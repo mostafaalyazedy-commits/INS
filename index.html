@@ -660,6 +660,10 @@ let normalizedSessions = []; // one object per unique session (aggregated)
 let filteredSessions = [];   // after filters applied
 let charts = {};             // chart instances
 
+function safeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch]));
+}
+
 /* ============================================================
    GOOGLE SHEET PARSER
    ============================================================ */
@@ -878,8 +882,8 @@ function aggregateSessions(rows) {
     if (r.eventType === 'branch_selected') s.hasBranchSelected = true;
     if (r.eventType === 'branches_loaded') s.hasBranchesLoaded = true;
     if (r.eventType === 'manual_fallback_shown') s.hasManualFallback = true;
-    if (r.eventType === 'whatsapp_click') { s.hasWhatsappClick = true; s.clickedWhatsapp = true; s.isConversion = true; }
-    if (r.eventType === 'maps_click') { s.hasMapsClick = true; s.clickedMaps = true; s.isConversion = true; }
+    if (r.eventType === 'whatsapp_click' || r.eventType === 'manual_whatsapp_click') { s.hasWhatsappClick = true; s.clickedWhatsapp = true; s.isConversion = true; }
+    if (r.eventType === 'maps_click' || r.eventType === 'manual_maps_click') { s.hasMapsClick = true; s.clickedMaps = true; s.isConversion = true; }
   });
 
   // Post-process
@@ -895,6 +899,10 @@ function aggregateSessions(rows) {
     }
     // isConversion: whatsapp or maps
     if (s.clickedWhatsapp || s.clickedMaps) s.isConversion = true;
+    if (!s.sourceType) s.sourceType = 'direct';
+    if (!s.deviceType) s.deviceType = 'unknown';
+    if (!s.browser) s.browser = 'Other';
+    if (!s.os) s.os = 'Other';
   });
 
   return Object.values(sessionMap);
@@ -915,10 +923,20 @@ function getDateRange(filter) {
   }
 }
 
+function parseGoogleLikeDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  const str = String(value);
+  const m = str.match(/Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?\)/);
+  if (m) return new Date(+m[1], +m[2], +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? null : d;
+}
+
 function parseSessionDate(s) {
-  if (s.clientTimeISO) return new Date(s.clientTimeISO);
-  if (s.startTime) return new Date(s.startTime);
-  if (s.date) return new Date(s.date);
+  if (s.clientTimeISO) return parseGoogleLikeDate(s.clientTimeISO);
+  if (s.startTime) return parseGoogleLikeDate(s.startTime);
+  if (s.date) return parseGoogleLikeDate(s.date);
   return null;
 }
 
@@ -980,11 +998,17 @@ function renderDashboard() {
   const total = s.length;
 
   if (total === 0) {
-    document.getElementById('dashboardContent').innerHTML = `
-      <div class="empty-state">
-        <div class="empty-icon">📭</div>
-        <div>لا توجد بيانات للفترة أو الفلتر المحدد.</div>
-      </div>`;
+    if (charts.conversion) { charts.conversion.destroy(); charts.conversion = null; }
+    if (charts.device) { charts.device.destroy(); charts.device = null; }
+    const empty = '<div class="empty-state"><div class="empty-icon">📭</div>لا توجد بيانات للفترة أو الفلتر المحدد.</div>';
+    ['kpiGrid','insightsGrid','funnelContainer','branchSummaryGrid','journeyGrid','techGrid','rawDataWrap'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = empty;
+    });
+    const branchesTable = document.getElementById('branchesTable');
+    if (branchesTable) branchesTable.innerHTML = empty;
+    const sourcePerformance = document.getElementById('sourcePerformance');
+    if (sourcePerformance) sourcePerformance.innerHTML = '<h3>أداء مصادر الزيارات</h3>' + empty;
     return;
   }
 
@@ -1411,7 +1435,7 @@ function renderRawData(s) {
       <tbody>${s.slice(0,100).map(row=>`<tr>${cols.map(c=>{
         const v = row[c];
         if (typeof v === 'boolean') return `<td>${v?'✅':'—'}</td>`;
-        return `<td>${v||'—'}</td>`;
+        return `<td>${safeHtml(v || '—')}</td>`;
       }).join('')}</tr>`).join('')}</tbody>
     </table>
     ${s.length>100?`<div style="padding:10px;text-align:center;font-size:12px;color:var(--text-muted)">عرض أول 100 من أصل ${s.length} سيشن</div>`:''}
@@ -1430,6 +1454,7 @@ async function loadData() {
   showLoading(true);
   document.getElementById('errorState').style.display = 'none';
   document.getElementById('mainContent').style.display = 'block';
+  document.getElementById('dashboardContent').style.display = 'block';
 
   const src = DATA_SOURCES.customerSessions;
   const url = src.getUrl();
