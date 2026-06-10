@@ -597,320 +597,319 @@
 </div><!-- end main -->
 
 <script>
-/* ================================================================
-   ██████╗  █████╗ ████████╗ █████╗     ██╗      █████╗ ██╗   ██╗███████╗██████╗
-   ██╔══██╗██╔══██╗╚══██╔══╝██╔══██╗    ██║     ██╔══██╗╚██╗ ██╔╝██╔════╝██╔══██╗
-   ██║  ██║███████║   ██║   ███████║    ██║     ███████║ ╚████╔╝ █████╗  ██████╔╝
-   ██║  ██║██╔══██║   ██║   ██╔══██║    ██║     ██╔══██║  ╚██╔╝  ██╔══╝  ██╔══██╗
-   ██████╔╝██║  ██║   ██║   ██║  ██║    ███████╗██║  ██║   ██║   ███████╗██║  ██║
-   ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝    ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝
-================================================================ */
-
 /* ============================================================
-   CONFIGURATION — تغيير الروابط هنا فقط
+   OCEAN EXECUTIVE DASHBOARD — Sessions_Summary Version
+   يقرأ صف واحد لكل Session بدل Customer_Sessions الخام
    ============================================================ */
+
 const CONFIG = {
   SHEET_ID: '1R3WiRuJkfL1MzaS9DALY04AtrLHZBcWVovA229bBtps',
-  SHEET_NAME: 'Customer_Sessions',
+  SHEET_NAME: 'Sessions_Summary',
+  DEFAULT_DATE_FILTER: '7d'
 };
 
-/* ============================================================
-   DATA SOURCES REGISTRY — Modular architecture
-   Add new backends here without touching dashboard logic
-   ============================================================ */
 const DATA_SOURCES = {
-  customerSessions: {
-    name: 'Customer Sessions',
+  sessionsSummary: {
+    name: 'Sessions Summary',
     type: 'google_sheet',
     getUrl: () => `https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(CONFIG.SHEET_NAME)}`,
     parser: parseGoogleSheetResponse,
-    enabled: true,
+    enabled: true
   },
-  /* FUTURE: Branch Redirect Backend */
   branchRedirects: {
     name: 'Branch Redirect Backend',
     type: 'future_api',
-    getUrl: () => '',          // PUT API URL here when ready
-    parser: (raw) => raw,
-    enabled: false,
-  },
-  /* FUTURE: QR Scan Backend */
-  qrScans: {
-    name: 'QR Scans Backend',
-    type: 'future_api',
     getUrl: () => '',
     parser: (raw) => raw,
-    enabled: false,
-  },
-  /* FUTURE: Landing Pages Backend */
-  landingPages: {
-    name: 'Landing Pages Backend',
-    type: 'future_api',
-    getUrl: () => '',
-    parser: (raw) => raw,
-    enabled: false,
-  },
+    enabled: false
+  }
 };
 
-/* ============================================================
-   GLOBAL STATE
-   ============================================================ */
-let rawRows = [];          // raw parsed rows from sheet
-let normalizedSessions = []; // one object per unique session (aggregated)
-let filteredSessions = [];   // after filters applied
-let charts = {};             // chart instances
+let rawRows = [];
+let normalizedSessions = [];
+let filteredSessions = [];
+let charts = {};
 
 function safeHtml(value) {
-  return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch]));
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({
+    '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;'
+  }[ch]));
 }
 
-/* ============================================================
-   GOOGLE SHEET PARSER
-   ============================================================ */
 function parseGoogleSheetResponse(rawText) {
-  // Google returns JSONP: google.visualization.Query.setResponse({...})
   const json = rawText.replace(/^[^\(]+\(/, '').replace(/\);?\s*$/, '');
   const data = JSON.parse(json);
-  const cols = data.table.cols.map(c => c.label);
+  if (data.status === 'error') {
+    throw new Error((data.errors && data.errors[0] && data.errors[0].detailed_message) || 'Google Sheet returned an error.');
+  }
+  const cols = (data.table.cols || []).map(c => c.label || c.id || '');
   return (data.table.rows || []).map(row => {
     const obj = {};
     cols.forEach((col, i) => {
       const cell = row.c && row.c[i];
       obj[col] = cell ? (cell.v !== null && cell.v !== undefined ? cell.v : '') : '';
+      if (cell && cell.f && !obj[col]) obj[col] = cell.f;
     });
     return obj;
   });
 }
 
-/* ============================================================
-   ROW → NORMALIZED FIELD MAPPING
-   ============================================================ */
-function mapRow(r) {
-  return {
-    // Identity
-    sessionId:          r['Session ID'] || '',
-    timestamp:          r['Timestamp'] || r['Client Time ISO'] || '',
-    date:               r['Date'] || '',
-    time:               r['Time'] || '',
-    eventType:          (r['Event Type'] || '').toLowerCase().trim(),
-    finalStatus:        (r['Final Status'] || '').toLowerCase().trim(),
-    isFinalRow:         String(r['Is Final Row']).toUpperCase() === 'TRUE',
-    isConversion:       String(r['Is Conversion']).toUpperCase() === 'TRUE',
-    conversionType:     r['Conversion Type'] || '',
-    funnelStep:         r['Funnel Step'] || '',
-    sessionEventNumber: parseInt(r['Session Event Number']) || 0,
+function getVal(row, keys, fallback='') {
+  for (const key of keys) {
+    if (row[key] !== undefined && row[key] !== null && String(row[key]).trim() !== '') return row[key];
+  }
+  return fallback;
+}
 
-    // Duration
-    durationSeconds:    parseFloat(r['Duration Seconds']) || 0,
+function parseBool(x) {
+  return x === true || x === 1 || String(x).trim().toUpperCase() === 'TRUE' || String(x).trim() === '1';
+}
 
-    // Location
-    locationPermission: (r['Location Permission'] || 'unknown').toLowerCase(),
-    locationError:      r['Location Error'] || '',
-    locationAccuracy:   parseFloat(r['Location Accuracy Meters']) || 0,
-    userLat:            parseFloat(r['User Lat'] || r['User Latitude']) || null,
-    userLng:            parseFloat(r['User Lng'] || r['User Longitude']) || null,
+function toNum(x, fallback=null) {
+  if (x === undefined || x === null || x === '') return fallback;
+  const n = parseFloat(String(x).replace(/[^\d.\-]/g, ''));
+  return Number.isFinite(n) ? n : fallback;
+}
 
-    // Branch (nearest at time of event)
-    branchId:           r['Nearest Branch ID'] || r['Nearest Overall Branch ID'] || '',
-    branchName:         r['Nearest Branch Name'] || r['Nearest Overall Branch Name'] || '',
-    branchCity:         r['Nearest Branch City'] || '',
-    branchDistrict:     r['Nearest Branch District'] || '',
-    distanceKm:         parseFloat(r['Distance KM'] || r['Nearest Overall Distance KM']) || null,
-    deliveryAvailable:  String(r['Delivery Available']).toUpperCase() === 'TRUE',
+function parseGoogleLikeDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  const str = String(value).trim();
+  const m = str.match(/Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?\)/);
+  if (m) return new Date(+m[1], +m[2], +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
 
-    // Selected Branch
-    selectedBranchId:   r['Selected Branch ID'] || '',
-    selectedBranchName: r['Selected Branch Name'] || '',
-    selectedBranchCity: r['Selected Branch City'] || '',
-    selectedBranchDistrict: r['Selected Branch District'] || '',
-    selectedDistanceKm: parseFloat(r['Selected Branch Distance KM']) || null,
-    selectedDelivery:   String(r['Selected Branch Delivery Available']).toUpperCase() === 'TRUE',
+  // دعم تاريخ Google Sheet النصي: yyyy-mm-dd HH:mm:ss
+  const normalized = str.includes('T') ? str : str.replace(' ', 'T');
+  const d = new Date(normalized);
+  return isNaN(d.getTime()) ? null : d;
+}
 
-    // Actions
-    clickedWhatsapp:    String(r['Clicked WhatsApp']).toUpperCase() === 'TRUE',
-    clickedMaps:        String(r['Clicked Maps']).toUpperCase() === 'TRUE',
-    exitedWithoutAction:String(r['Exited Without Action']).toUpperCase() === 'TRUE',
-    exitReason:         r['Exit Reason'] || '',
+function getSessionDate(s) {
+  return parseGoogleLikeDate(s.endTime) || parseGoogleLikeDate(s.startTime) || parseGoogleLikeDate(s.lastUpdated) || parseGoogleLikeDate(s.date);
+}
 
-    // Branch selection method
-    branchSelectionMethod: r['Branch Selection Method'] || '',
-    distanceBucket:     r['Distance Bucket'] || '',
+function getDistanceCategory(distanceKm) {
+  if (distanceKm === null || distanceKm === undefined || isNaN(distanceKm)) return 'unknown';
+  if (distanceKm <= 3) return 'near';
+  if (distanceKm <= 7) return 'medium';
+  if (distanceKm <= 15) return 'far';
+  return 'very_far';
+}
 
-    // Sheet load
-    sheetLoadStatus:    r['Sheet Load Status'] || '',
-    sheetLoadTimeMs:    parseFloat(r['Sheet Load Time MS']) || null,
-    sheetLoadError:     r['Sheet Load Error'] || '',
-    errorStage:         r['Error Stage'] || '',
-    branchesCount:      parseInt(r['Branches Count']) || 0,
+function getCoverageStatus(distanceKm) {
+  if (distanceKm === null || distanceKm === undefined || isNaN(distanceKm)) return 'unknown';
+  return distanceKm <= 5 ? 'inside_coverage' : 'outside_coverage';
+}
 
-    // Traffic
-    sourceType:         r['Source Type'] || '',
-    deviceType:         r['Device Type'] || '',
-    browser:            r['Browser'] || '',
-    os:                 r['OS'] || '',
-    utmSource:          r['UTM Source'] || '',
-    utmMedium:          r['UTM Medium'] || '',
-    utmCampaign:        r['UTM Campaign'] || '',
-    referrer:           r['Referrer'] || '',
-    pageUrl:            r['Page URL'] || '',
-    language:           r['Language'] || '',
-    userAgent:          r['User Agent'] || '',
+function getPrimaryAction(row) {
+  if (parseBool(row['Clicked WhatsApp']) || String(row['Final Status'] || '').toLowerCase() === 'whatsapp_clicked') return 'whatsapp';
+  if (parseBool(row['Clicked Maps']) || String(row['Final Status'] || '').toLowerCase() === 'maps_clicked') return 'maps';
+  return 'none';
+}
 
-    // Client time
-    clientTimeISO:      r['Client Time ISO'] || '',
-    clientTimeLocal:    r['Client Time Local'] || '',
+function getConversionIntent(primaryAction) {
+  if (primaryAction === 'whatsapp') return 'strong';
+  if (primaryAction === 'maps') return 'medium';
+  return 'none';
+}
+
+function getConversionQuality(row, primaryAction) {
+  const trigger = String(row['WhatsApp Trigger Type'] || '').toLowerCase();
+  const method  = String(row['Branch Selection Method'] || '').toLowerCase();
+  if (primaryAction === 'none') return 'no_conversion';
+  if (trigger === 'auto_redirect') return 'auto_redirect';
+  if (method === 'manual_selected') return 'manual_branch_click';
+  return 'real_click';
+}
+
+function getSessionQuality(s) {
+  if (s.isTestSession) return 'invalid';
+  if (s.clickedWhatsapp) return 'high_intent';
+  if (s.clickedMaps || s.selectedBranchId) return 'medium_intent';
+  if (s.locationPermission === 'denied' || s.exitedWithoutAction) return 'low_intent';
+  return 'medium_intent';
+}
+
+function getRoutingQuality(s) {
+  if (!s.selectedBranchId) return 'unknown';
+  if (s.hasError) return 'poor';
+  if (s.selectedDistanceKm === null || s.selectedDistanceKm === undefined) return 'unknown';
+  if (s.selectedDistanceKm <= 5 && s.selectedDelivery) return 'excellent';
+  if (s.selectedDistanceKm <= 10) return 'acceptable';
+  return 'poor';
+}
+
+function getTrafficChannel(row) {
+  const source = String(row['Source Type'] || '').toLowerCase();
+  const url = String(row['Page URL'] || '').toLowerCase();
+  const ref = String(row['Referrer'] || '').toLowerCase();
+  const utmSource = String(row['UTM Source'] || '').toLowerCase();
+  const utmMedium = String(row['UTM Medium'] || '').toLowerCase();
+
+  if (url.includes('file://') || url.includes('localhost') || url.includes('127.0.0.1')) return 'internal_test';
+  if (source === 'qr' || utmSource === 'qr' || url.includes('qr')) return 'qr';
+  if (utmMedium.includes('paid') || utmMedium.includes('cpc') || utmMedium.includes('ads')) return 'paid_social';
+  if (/instagram|tiktok|snapchat|facebook/.test(ref) || /instagram|tiktok|snapchat|facebook/.test(source)) return 'organic_social';
+  if (source.includes('google') || ref.includes('google')) return 'google';
+  if (source.includes('whatsapp') || ref.includes('whatsapp') || ref.includes('wa.me')) return 'whatsapp';
+  if (source === 'direct' || !source) return 'direct';
+  return source || 'unknown';
+}
+
+function getFailurePoint(row) {
+  const errorStage = String(row['Error Stage'] || '').toLowerCase();
+  const locErr = String(row['Location Error'] || '').toLowerCase();
+  const exit = String(row['Exit Reason'] || '').toLowerCase();
+
+  if (errorStage && errorStage !== 'none') return errorStage;
+  if (locErr.includes('timeout')) return 'location_timeout';
+  if (locErr.includes('permission') || exit.includes('denied')) return 'location_permission';
+  if (String(row['Sheet Load Status'] || '').toLowerCase() === 'error') return 'sheet_load';
+  return 'none';
+}
+
+function getBusinessImpact(s) {
+  if (s.hasError && !s.isConversion) return 'conversion_lost';
+  if (s.exitedWithoutAction || s.locationPermission === 'denied') return 'partial_loss';
+  return 'no_impact';
+}
+
+function mapSummaryRow(r) {
+  const primaryAction = getPrimaryAction(r);
+  const pageUrl = String(r['Page URL'] || '');
+  const isTestSession = /file:\/\//i.test(pageUrl) || /localhost|127\.0\.0\.1/i.test(pageUrl);
+  const selectedDistanceKm = toNum(r['Selected Branch Distance KM']);
+  const hasError = (String(r['Error Stage'] || '').toLowerCase() !== 'none' && String(r['Error Stage'] || '').trim() !== '') ||
+                   String(r['Sheet Load Status'] || '').toLowerCase() === 'error' ||
+                   String(r['Location Error'] || '').trim() !== '';
+
+  const startTime = getVal(r, ['Start Timestamp']);
+  const endTime = getVal(r, ['End Timestamp']);
+  const sessionDate = parseGoogleLikeDate(endTime) || parseGoogleLikeDate(startTime) || parseGoogleLikeDate(r['Date']);
+
+  const session = {
+    sessionId: String(r['Session ID'] || '').trim(),
+    startTime,
+    endTime,
+    date: getVal(r, ['Date']),
+    lastUpdated: getVal(r, ['Last Updated']),
+    finalStatus: String(r['Final Status'] || 'unknown').toLowerCase(),
+    isFinalRow: true,
+    isConversion: parseBool(r['Is Conversion']) || primaryAction !== 'none',
+    conversionType: String(r['Conversion Type'] || (primaryAction !== 'none' ? primaryAction : '')),
+    primaryAction,
+    conversionIntent: getConversionIntent(primaryAction),
+    conversionQuality: getConversionQuality(r, primaryAction),
+    durationSeconds: toNum(r['Duration Seconds'], 0),
+
+    locationPermission: String(r['Location Permission'] || 'unknown').toLowerCase(),
+    locationError: String(r['Location Error'] || ''),
+    userLat: toNum(r['User Latitude']),
+    userLng: toNum(r['User Longitude']),
+    userLocationLink: String(r['User Location Link'] || ''),
+
+    selectedBranchId: String(r['Selected Branch ID'] || ''),
+    selectedBranchName: String(r['Selected Branch Name'] || ''),
+    selectedBranchCity: String(r['Selected Branch City'] || ''),
+    selectedBranchDistrict: String(r['Selected Branch District'] || ''),
+    selectedBranchStreet: String(r['Selected Branch Street'] || ''),
+    selectedDistanceKm,
+    selectedDelivery: parseBool(r['Selected Branch Delivery Available']),
+    selectedBranchWhatsapp: String(r['Selected Branch WhatsApp'] || ''),
+    selectedBranchGoogleLink: String(r['Selected Branch Google Link'] || ''),
+
+    branchId: String(r['Selected Branch ID'] || ''),
+    branchName: String(r['Selected Branch Name'] || ''),
+    branchCity: String(r['Selected Branch City'] || ''),
+    branchDistrict: String(r['Selected Branch District'] || ''),
+    distanceKm: selectedDistanceKm,
+    deliveryAvailable: parseBool(r['Selected Branch Delivery Available']),
+
+    clickedWhatsapp: parseBool(r['Clicked WhatsApp']) || primaryAction === 'whatsapp',
+    whatsappClickTime: String(r['WhatsApp Click Time'] || ''),
+    whatsappUrl: String(r['WhatsApp URL'] || ''),
+    whatsappMessageType: String(r['WhatsApp Message Type'] || ''),
+    whatsappTriggerType: String(r['WhatsApp Trigger Type'] || ''),
+
+    clickedMaps: parseBool(r['Clicked Maps']) || primaryAction === 'maps',
+    mapsClickTime: String(r['Maps Click Time'] || ''),
+    mapsUrl: String(r['Maps URL'] || ''),
+
+    exitedWithoutAction: parseBool(r['Exited Without Action']) || /no_action|closed|left|no_click/i.test(String(r['Exit Reason'] || '')),
+    exitReason: String(r['Exit Reason'] || ''),
+
+    branchSelectionMethod: String(r['Branch Selection Method'] || ''),
+    deliveryLogicResult: String(r['Delivery Logic Result'] || ''),
+    distanceBucket: String(r['Distance Bucket'] || ''),
+    distanceCategory: getDistanceCategory(selectedDistanceKm),
+    isFarBranch: selectedDistanceKm !== null && selectedDistanceKm > 10,
+    coverageStatus: getCoverageStatus(selectedDistanceKm),
+
+    branchesCount: toNum(r['Branches Count'], 0),
+    sheetLoadStatus: String(r['Sheet Load Status'] || ''),
+    sheetLoadTimeMs: toNum(r['Sheet Load Time MS']),
+    sheetLoadError: String(r['Sheet Load Error'] || ''),
+    errorStage: String(r['Error Stage'] || 'none'),
+
+    sourceType: String(r['Source Type'] || 'direct') || 'direct',
+    trafficChannel: getTrafficChannel(r),
+    deviceType: String(r['Device Type'] || 'unknown') || 'unknown',
+    browser: String(r['Browser'] || 'Other') || 'Other',
+    os: String(r['OS'] || 'Other') || 'Other',
+    userAgent: String(r['User Agent'] || ''),
+    language: String(r['Language'] || ''),
+    referrer: String(r['Referrer'] || ''),
+    pageUrl,
+    utmSource: String(r['UTM Source'] || ''),
+    utmMedium: String(r['UTM Medium'] || ''),
+    utmCampaign: String(r['UTM Campaign'] || ''),
+    utmContent: String(r['UTM Content'] || ''),
+    utmTerm: String(r['UTM Term'] || ''),
+
+    hourOfDay: sessionDate ? sessionDate.getHours() : null,
+    dayOfWeek: sessionDate ? ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][sessionDate.getDay()] : '',
+    dateGroup: sessionDate ? `${sessionDate.getFullYear()}-${String(sessionDate.getMonth()+1).padStart(2,'0')}` : '',
+
+    hasError,
+    failurePoint: getFailurePoint(r),
+    isTestSession,
+    isValidBusinessSession: !isTestSession && !hasError,
+    isCampaignTraffic: !!(r['UTM Source'] || r['UTM Campaign'] || r['UTM Medium']),
+
+    // Flags متوافقة مع نفس رندر الداشبورد القديم
+    events: [{ eventType: 'summary_row' }],
+    hasLocationRequested: String(r['Location Permission'] || 'unknown').toLowerCase() !== 'unknown',
+    hasLocationGranted: String(r['Location Permission'] || '').toLowerCase() === 'granted',
+    hasLocationDenied: String(r['Location Permission'] || '').toLowerCase() === 'denied',
+    hasBranchSelected: !!String(r['Selected Branch ID'] || r['Selected Branch Name'] || ''),
+    hasBranchesLoaded: String(r['Sheet Load Status'] || '').toLowerCase() === 'success',
+    hasManualFallback: /manual|fallback/i.test(String(r['Branch Selection Method'] || r['Exit Reason'] || '')),
+    hasWhatsappClick: parseBool(r['Clicked WhatsApp']) || primaryAction === 'whatsapp',
+    hasMapsClick: parseBool(r['Clicked Maps']) || primaryAction === 'maps',
+    hasSessionEnd: !!endTime,
+    closedBeforePermission: /closed_before_permission/i.test(String(r['Exit Reason'] || r['Final Status'] || ''))
   };
+
+  session.sessionQuality = getSessionQuality(session);
+  session.routingQuality = getRoutingQuality(session);
+  session.businessImpact = getBusinessImpact(session);
+  return session;
 }
 
-/* ============================================================
-   SESSION AGGREGATION
-   Groups multiple rows per Session ID into one session object
-   ============================================================ */
-function aggregateSessions(rows) {
-  const sessionMap = {};
-
-  rows.forEach(raw => {
-    const r = mapRow(raw);
-    if (!r.sessionId) return;
-
-    if (!sessionMap[r.sessionId]) {
-      sessionMap[r.sessionId] = {
-        sessionId: r.sessionId,
-        events: [],
-        // Fields filled during aggregation:
-        startTime: null,
-        endTime: null,
-        date: r.date,
-        finalStatus: '',
-        isFinalRow: false,
-        isConversion: false,
-        conversionType: '',
-        durationSeconds: 0,
-        locationPermission: 'unknown',
-        locationError: '',
-        locationAccuracy: 0,
-        userLat: null, userLng: null,
-        branchId: '', branchName: '', branchCity: '', branchDistrict: '',
-        distanceKm: null,
-        selectedBranchId: '', selectedBranchName: '', selectedBranchCity: '',
-        selectedBranchDistrict: '', selectedDistanceKm: null, selectedDelivery: false,
-        clickedWhatsapp: false, clickedMaps: false,
-        exitedWithoutAction: false, exitReason: '',
-        branchSelectionMethod: '',
-        distanceBucket: '',
-        sheetLoadStatus: '', sheetLoadTimeMs: null, sheetLoadError: '',
-        errorStage: 'none', branchesCount: 0,
-        sourceType: '', deviceType: '', browser: '', os: '',
-        utmSource: '', utmMedium: '', utmCampaign: '', referrer: '',
-        pageUrl: '', language: '',
-        hasLocationGranted: false,
-        hasLocationDenied: false,
-        hasLocationRequested: false,
-        hasBranchSelected: false,
-        hasBranchesLoaded: false,
-        hasManualFallback: false,
-        hasWhatsappClick: false,
-        hasMapsClick: false,
-        hasSessionEnd: false,
-        closedBeforePermission: false,
-      };
-    }
-
-    const s = sessionMap[r.sessionId];
-    s.events.push(r);
-
-    // Merge fields — always take latest non-empty value for most fields
-    if (r.eventType === 'session_start' && !s.startTime) {
-      s.startTime = r.timestamp || r.clientTimeISO;
-      s.date = r.date;
-    }
-    if (r.eventType === 'session_end') {
-      s.hasSessionEnd = true;
-      s.endTime = r.timestamp || r.clientTimeISO;
-      s.finalStatus = r.finalStatus || s.finalStatus;
-      if (r.exitedWithoutAction) s.exitedWithoutAction = true;
-      if (r.exitReason && r.exitReason !== 'unknown') s.exitReason = r.exitReason;
-    }
-    if (r.isFinalRow) {
-      s.isFinalRow = true;
-      s.finalStatus = r.finalStatus;
-    }
-    if (r.isConversion) {
-      s.isConversion = true;
-      s.conversionType = r.conversionType || s.conversionType;
-    }
-    if (r.durationSeconds > s.durationSeconds) s.durationSeconds = r.durationSeconds;
-
-    // Location
-    if (r.locationPermission === 'granted') { s.locationPermission = 'granted'; s.hasLocationGranted = true; }
-    else if (r.locationPermission === 'denied' && s.locationPermission !== 'granted') { s.locationPermission = 'denied'; s.hasLocationDenied = true; }
-    if (r.locationError) s.locationError = r.locationError;
-    if (r.locationAccuracy > 0) s.locationAccuracy = r.locationAccuracy;
-    if (r.userLat) { s.userLat = r.userLat; s.userLng = r.userLng; }
-
-    // Branch
-    if (r.branchId) { s.branchId = r.branchId; s.branchName = r.branchName; s.branchCity = r.branchCity; s.branchDistrict = r.branchDistrict; s.distanceKm = r.distanceKm; }
-    if (r.selectedBranchId) { s.selectedBranchId = r.selectedBranchId; s.selectedBranchName = r.selectedBranchName; s.selectedBranchCity = r.selectedBranchCity; s.selectedBranchDistrict = r.selectedBranchDistrict; s.selectedDistanceKm = r.selectedDistanceKm; s.selectedDelivery = r.selectedDelivery; }
-
-    // Actions
-    if (r.clickedWhatsapp) s.clickedWhatsapp = true;
-    if (r.clickedMaps) s.clickedMaps = true;
-    if (r.branchesCount > s.branchesCount) s.branchesCount = r.branchesCount;
-    if (r.sheetLoadStatus === 'success') { s.sheetLoadStatus = 'success'; if (r.sheetLoadTimeMs) s.sheetLoadTimeMs = r.sheetLoadTimeMs; }
-    else if (r.sheetLoadStatus && !s.sheetLoadStatus) s.sheetLoadStatus = r.sheetLoadStatus;
-    if (r.sheetLoadError) s.sheetLoadError = r.sheetLoadError;
-    if (r.errorStage && r.errorStage !== 'none') s.errorStage = r.errorStage;
-    if (r.branchSelectionMethod && r.branchSelectionMethod !== 'unknown') s.branchSelectionMethod = r.branchSelectionMethod;
-    if (r.distanceBucket && r.distanceBucket !== 'unknown') s.distanceBucket = r.distanceBucket;
-
-    // Traffic — take from first event
-    if (!s.sourceType) s.sourceType = r.sourceType;
-    if (!s.deviceType) s.deviceType = r.deviceType;
-    if (!s.browser) s.browser = r.browser;
-    if (!s.os) s.os = r.os;
-    if (!s.utmSource) s.utmSource = r.utmSource;
-    if (!s.utmMedium) s.utmMedium = r.utmMedium;
-    if (!s.utmCampaign) s.utmCampaign = r.utmCampaign;
-    if (!s.referrer) s.referrer = r.referrer;
-    if (!s.pageUrl) s.pageUrl = r.pageUrl;
-    if (!s.language) s.language = r.language;
-
-    // Event flags
-    if (r.eventType === 'location_requested') s.hasLocationRequested = true;
-    if (r.eventType === 'location_granted') s.hasLocationGranted = true;
-    if (r.eventType === 'location_denied') s.hasLocationDenied = true;
-    if (r.eventType === 'branch_selected') s.hasBranchSelected = true;
-    if (r.eventType === 'branches_loaded') s.hasBranchesLoaded = true;
-    if (r.eventType === 'manual_fallback_shown') s.hasManualFallback = true;
-    if (r.eventType === 'whatsapp_click' || r.eventType === 'manual_whatsapp_click') { s.hasWhatsappClick = true; s.clickedWhatsapp = true; s.isConversion = true; }
-    if (r.eventType === 'maps_click' || r.eventType === 'manual_maps_click') { s.hasMapsClick = true; s.clickedMaps = true; s.isConversion = true; }
+function normalizeSummaryRows(rows) {
+  const sessions = rows.map(mapSummaryRow).filter(s => s.sessionId);
+  // لو فيه تكرار نحتفظ بآخر Last Updated أو End Timestamp
+  const map = {};
+  sessions.forEach(s => {
+    const old = map[s.sessionId];
+    if (!old) { map[s.sessionId] = s; return; }
+    const oldDate = getSessionDate(old) || new Date(0);
+    const newDate = getSessionDate(s) || new Date(0);
+    if (newDate >= oldDate) map[s.sessionId] = s;
   });
-
-  // Post-process
-  Object.values(sessionMap).forEach(s => {
-    // Final status fallback
-    if (!s.finalStatus) {
-      const statuses = s.events.map(e => e.finalStatus).filter(Boolean);
-      s.finalStatus = statuses[statuses.length - 1] || 'unknown';
-    }
-    // Closed before permission: session end without ever requesting location
-    if (s.hasSessionEnd && !s.hasLocationRequested && !s.hasLocationGranted) {
-      s.closedBeforePermission = true;
-    }
-    // isConversion: whatsapp or maps
-    if (s.clickedWhatsapp || s.clickedMaps) s.isConversion = true;
-    if (!s.sourceType) s.sourceType = 'direct';
-    if (!s.deviceType) s.deviceType = 'unknown';
-    if (!s.browser) s.browser = 'Other';
-    if (!s.os) s.os = 'Other';
-  });
-
-  return Object.values(sessionMap);
+  return Object.values(map);
 }
 
-/* ============================================================
-   DATE FILTER HELPER
-   ============================================================ */
 function getDateRange(filter) {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -923,32 +922,15 @@ function getDateRange(filter) {
   }
 }
 
-function parseGoogleLikeDate(value) {
-  if (!value) return null;
-  if (value instanceof Date) return value;
-  const str = String(value);
-  const m = str.match(/Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?\)/);
-  if (m) return new Date(+m[1], +m[2], +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
-  const d = new Date(str);
-  return isNaN(d.getTime()) ? null : d;
-}
-
 function parseSessionDate(s) {
-  if (s.clientTimeISO) return parseGoogleLikeDate(s.clientTimeISO);
-  if (s.startTime) return parseGoogleLikeDate(s.startTime);
-  if (s.date) return parseGoogleLikeDate(s.date);
-  return null;
+  return getSessionDate(s);
 }
 
-/* ============================================================
-   APPLY FILTERS
-   ============================================================ */
 function applyFilters() {
   const dateFilter  = document.getElementById('filterDate').value;
   const cityFilter  = document.getElementById('filterCity').value;
   const srcFilter   = document.getElementById('filterSource').value;
   const devFilter   = document.getElementById('filterDevice').value;
-
   const dateRange = getDateRange(dateFilter);
 
   filteredSessions = normalizedSessions.filter(s => {
@@ -957,7 +939,7 @@ function applyFilters() {
       if (!d || d < dateRange[0] || d >= dateRange[1]) return false;
     }
     if (cityFilter !== 'all' && (s.selectedBranchCity || s.branchCity) !== cityFilter) return false;
-    if (srcFilter  !== 'all' && s.sourceType !== srcFilter) return false;
+    if (srcFilter  !== 'all' && (s.trafficChannel || s.sourceType) !== srcFilter) return false;
     if (devFilter  !== 'all' && s.deviceType !== devFilter) return false;
     return true;
   });
@@ -965,12 +947,9 @@ function applyFilters() {
   renderDashboard();
 }
 
-/* ============================================================
-   POPULATE FILTER DROPDOWNS
-   ============================================================ */
 function populateFilters(sessions) {
   const cities  = [...new Set(sessions.map(s => s.selectedBranchCity || s.branchCity).filter(Boolean))].sort();
-  const sources = [...new Set(sessions.map(s => s.sourceType).filter(Boolean))].sort();
+  const sources = [...new Set(sessions.map(s => s.trafficChannel || s.sourceType).filter(Boolean))].sort();
   const devices = [...new Set(sessions.map(s => s.deviceType).filter(Boolean))].sort();
 
   function fillSelect(id, values, labels) {
@@ -990,9 +969,9 @@ function populateFilters(sessions) {
   fillSelect('filterDevice', devices);
 }
 
-/* ============================================================
-   RENDER DASHBOARD
-   ============================================================ */
+function pct(n, d) { return d ? Math.round(n / d * 100) : 0; }
+function fmt(n) { return n >= 1000 ? (n/1000).toFixed(1)+'K' : n; }
+
 function renderDashboard() {
   const s = filteredSessions;
   const total = s.length;
@@ -1012,24 +991,23 @@ function renderDashboard() {
     return;
   }
 
-  // ---- KPIs ----
-  const sessionsWithLocationRequested = s.filter(x => x.hasLocationRequested);
+  const businessSessions = s.filter(x => x.isValidBusinessSession);
+  const testSessions = s.filter(x => x.isTestSession);
   const sessionsGranted   = s.filter(x => x.hasLocationGranted);
   const sessionsDenied    = s.filter(x => x.hasLocationDenied);
-  const sessionsWithBranch = s.filter(x => x.hasBranchSelected || x.clickedWhatsapp || x.clickedMaps || x.selectedBranchId);
+  const sessionsWithLocationKnown = s.filter(x => x.locationPermission !== 'unknown');
+  const sessionsWithBranch = s.filter(x => x.hasBranchSelected || x.clickedWhatsapp || x.clickedMaps);
   const sessionsWA        = s.filter(x => x.clickedWhatsapp || x.hasWhatsappClick);
   const sessionsMaps      = s.filter(x => x.clickedMaps || x.hasMapsClick);
-  const sessionsNoAction  = s.filter(x => x.exitedWithoutAction || x.finalStatus === 'exited_without_action');
-  const sessionsWithEnd   = s.filter(x => x.hasSessionEnd && x.durationSeconds > 0);
-  const avgDuration       = sessionsWithEnd.length ? Math.round(sessionsWithEnd.reduce((a,b) => a+b.durationSeconds,0) / sessionsWithEnd.length) : 0;
+  const sessionsNoAction  = s.filter(x => x.exitedWithoutAction || x.finalStatus === 'exited_without_action' || x.primaryAction === 'none');
+  const sessionsWithEnd   = s.filter(x => x.durationSeconds > 0);
+  const avgDuration       = sessionsWithEnd.length ? Math.round(sessionsWithEnd.reduce((a,b) => a + (b.durationSeconds || 0), 0) / sessionsWithEnd.length) : 0;
   const sheetSucc         = s.filter(x => x.sheetLoadStatus === 'success');
+  const sheetWithStatus   = s.filter(x => x.sheetLoadStatus);
   const sheetLoadMs       = sheetSucc.length ? Math.round(sheetSucc.reduce((a,b)=>a+(b.sheetLoadTimeMs||0),0)/sheetSucc.length) : 0;
 
-  const pct = (n, d) => d ? Math.round(n/d*100) : 0;
-  const fmt = (n) => n >= 1000 ? (n/1000).toFixed(1)+'K' : n;
-
-  const locGrantRate  = pct(sessionsGranted.length, sessionsWithLocationRequested.length);
-  const locDenyRate   = pct(sessionsDenied.length,  sessionsWithLocationRequested.length);
+  const locGrantRate  = pct(sessionsGranted.length, sessionsWithLocationKnown.length || total);
+  const locDenyRate   = pct(sessionsDenied.length,  sessionsWithLocationKnown.length || total);
   const branchSelRate = pct(sessionsWithBranch.length, total);
   const waRate        = pct(sessionsWA.length, total);
   const mapsRate      = pct(sessionsMaps.length, total);
@@ -1040,238 +1018,193 @@ function renderDashboard() {
     if (value >= warn) return ['warning','متوسط ⚡'];
     return ['critical','يحتاج تحسين ⚠'];
   }
-  function statusBadgeInv(value, warn, bad) { // lower is better
+  function statusBadgeInv(value, warn, bad) {
     if (value <= warn) return ['good','جيد ✓'];
     if (value <= bad)  return ['warning','مرتفع ⚡'];
     return ['critical','مرتفع جداً ⚠'];
   }
 
   const kpis = [
-    { icon:'👥', label:'إجمالي السيشنز', value: fmt(total), cls:'neutral', badge:['neutral','إجمالي'] },
-    { icon:'📄', label:'فتح الصفحة', value: fmt(s.filter(x=>x.events.some(e=>e.eventType==='session_start')).length), cls:'neutral', badge:['neutral',''] },
+    { icon:'👥', label:'إجمالي السيشنز', value: fmt(total), cls:'neutral', badge:['neutral','Summary'] },
+    { icon:'✅', label:'سيشنز بيزنس صالحة', value: fmt(businessSessions.length), cls:'good', badge:['good', pct(businessSessions.length,total)+'%'] },
+    { icon:'🧪', label:'سيشنز اختبار', value: fmt(testSessions.length), cls:testSessions.length?'warning':'good', badge:[testSessions.length?'warning':'good', testSessions.length?'استبعدها':'نظيف'] },
     { icon:'📍', label:'الموافقة على اللوكيشن', value: locGrantRate+'%', cls: locGrantRate>=70?'good':locGrantRate>=50?'warning':'critical', badge: statusBadge(locGrantRate,70,50) },
     { icon:'🚫', label:'رفض اللوكيشن', value: locDenyRate+'%', cls: locDenyRate<=15?'good':locDenyRate<=30?'warning':'critical', badge: statusBadgeInv(locDenyRate,15,30) },
     { icon:'🏪', label:'اختيار فرع', value: branchSelRate+'%', cls: branchSelRate>=60?'good':branchSelRate>=40?'warning':'critical', badge: statusBadge(branchSelRate,60,40) },
     { icon:'💬', label:'تحويل WhatsApp', value: waRate+'%', cls: waRate>=40?'good':waRate>=20?'warning':'critical', badge: statusBadge(waRate,40,20) },
     { icon:'🗺️', label:'نقر على الخريطة', value: mapsRate+'%', cls: mapsRate>=20?'good':mapsRate>=10?'warning':'critical', badge: statusBadge(mapsRate,20,10) },
-    { icon:'🚪', label:'خروج بدون action', value: exitRate+'%', cls: exitRate<=20?'good':exitRate<=40?'warning':'critical', badge: statusBadgeInv(exitRate,20,40) },
-    { icon:'⏱️', label:'متوسط مدة السيشن', value: avgDuration+'ث', cls: avgDuration>=5&&avgDuration<=120?'good':'warning', badge: ['neutral',''] },
-    { icon:'📊', label:'معدل تحميل البيانات', value: pct(sheetSucc.length, s.filter(x=>x.sheetLoadStatus).length)+'%', cls: sheetSucc.length ? (pct(sheetSucc.length,s.filter(x=>x.sheetLoadStatus).length)>=90?'good':'warning') : 'neutral', badge:['neutral',''] },
+    { icon:'🚪', label:'خروج بدون Action', value: exitRate+'%', cls: exitRate<=20?'good':exitRate<=40?'warning':'critical', badge: statusBadgeInv(exitRate,20,40) },
+    { icon:'⏱️', label:'متوسط مدة السيشن', value: avgDuration+'ث', cls: avgDuration>=3&&avgDuration<=120?'good':'warning', badge:['neutral',''] },
+    { icon:'📊', label:'نجاح تحميل البيانات', value: pct(sheetSucc.length, sheetWithStatus.length || total)+'%', cls:'neutral', badge:['neutral', sheetLoadMs ? sheetLoadMs+'ms' : ''] }
   ];
 
   document.getElementById('kpiGrid').innerHTML = kpis.map(k => `
     <div class="kpi-card ${k.cls}">
       <div class="kpi-icon">${k.icon}</div>
-      <div class="kpi-value">${k.value}</div>
-      <div class="kpi-label">${k.label}</div>
-      ${k.badge[1] ? `<span class="kpi-badge badge-${k.badge[0]}">${k.badge[1]}</span>` : ''}
+      <div class="kpi-value">${safeHtml(k.value)}</div>
+      <div class="kpi-label">${safeHtml(k.label)}</div>
+      ${k.badge[1] ? `<span class="kpi-badge badge-${k.badge[0]}">${safeHtml(k.badge[1])}</span>` : ''}
     </div>`).join('');
 
-  // ---- INSIGHTS ----
-  const insights = generateInsights(s, {total, sessionsWA, sessionsMaps, sessionsNoAction, sessionsGranted, sessionsDenied, sessionsWithLocationRequested, sessionsWithBranch, waRate, exitRate, locGrantRate, locDenyRate, sheetSucc, sheetLoadMs});
+  const insights = generateInsights(s, {total, businessSessions, testSessions, sessionsWA, sessionsMaps, sessionsNoAction, sessionsGranted, sessionsDenied, waRate, exitRate, locGrantRate, locDenyRate, sheetSucc, sheetLoadMs});
   document.getElementById('insightsGrid').innerHTML = insights.map(i => `
     <div class="insight-card">
       <div class="insight-icon ${i.type}">${i.emoji}</div>
       <div class="insight-text">${i.text}</div>
     </div>`).join('');
 
-  // ---- FUNNEL ----
   renderFunnel(s, total);
-
-  // ---- CONVERSION CHART ----
   renderConversionChart(s, sessionsWA.length, sessionsMaps.length, sessionsNoAction.length, sessionsDenied.length);
-
-  // ---- BRANCH SUMMARY ----
   renderBranchSummary(s);
-
-  // ---- TOP BRANCHES TABLE ----
   renderBranchesTable(s);
-
-  // ---- SOURCE PERFORMANCE ----
   renderSourcePerf(s);
-
-  // ---- DEVICE CHART ----
   renderDeviceChart(s);
-
-  // ---- JOURNEY HEALTH ----
-  renderJourneyHealth(s, sessionsWA.length, sessionsMaps.length, sessionsNoAction.length, sessionsGranted.length, sessionsDenied.length);
-
-  // ---- TECH HEALTH ----
+  renderJourneyHealth(s, sessionsWA.length, sessionsMaps.length, sessionsNoAction.length);
   renderTechHealth(s, sheetSucc, sheetLoadMs);
-
-  // ---- RAW DATA ----
   renderRawData(s);
 }
 
-/* ============================================================
-   INSIGHTS GENERATOR
-   ============================================================ */
 function generateInsights(s, kpis) {
   const insights = [];
+  if (kpis.testSessions.length > 0) {
+    insights.push({ emoji:'🧪', type:'warning', text:`<strong>${kpis.testSessions.length} سيشن اختبار</strong> تم رصدها من روابط file/localhost. استبعدها عند تقييم الأداء الحقيقي.` });
+  }
+  if (kpis.waRate >= 60) insights.push({ emoji:'🔥', type:'positive', text:`<strong>معدل تحويل WhatsApp ممتاز (${kpis.waRate}%)</strong> — صفحة التوجيه تحقق Action واضح.` });
+  else if (kpis.waRate >= 30) insights.push({ emoji:'💬', type:'warning', text:`<strong>معدل WhatsApp متوسط (${kpis.waRate}%)</strong> — يوجد مجال لتحسين CTA أو تأخير التحويل التلقائي.` });
+  else insights.push({ emoji:'⚠️', type:'negative', text:`<strong>معدل WhatsApp منخفض (${kpis.waRate}%)</strong> — راجع رحلة العميل بعد اختيار الفرع.` });
 
-  // WhatsApp conversion
-  if (kpis.waRate >= 60) insights.push({ emoji:'🔥', type:'positive', text:`<strong>معدل تحويل WhatsApp ممتاز (${kpis.waRate}%)</strong> — الصفحة تحول بنجاح الغالبية العظمى للعملاء.` });
-  else if (kpis.waRate >= 30) insights.push({ emoji:'💬', type:'warning', text:`<strong>معدل WhatsApp معتدل (${kpis.waRate}%)</strong> — هناك فرصة لتحسين CTA والرسالة التوجيهية.` });
-  else insights.push({ emoji:'⚠️', type:'negative', text:`<strong>معدل WhatsApp منخفض (${kpis.waRate}%)</strong> — يجب مراجعة تجربة المستخدم بعد اختيار الفرع.` });
+  if (kpis.locDenyRate > 30) insights.push({ emoji:'📍', type:'negative', text:`<strong>رفض اللوكيشن مرتفع (${kpis.locDenyRate}%)</strong> — هذا يقلل دقة توجيه العميل لأقرب فرع.` });
+  else if (kpis.locDenyRate > 15) insights.push({ emoji:'📍', type:'warning', text:`<strong>رفض اللوكيشن (${kpis.locDenyRate}%)</strong> — وضّح للعميل سبب طلب الموقع قبل ظهور الإذن.` });
 
-  // Location denial
-  if (kpis.locDenyRate > 30) insights.push({ emoji:'📍', type:'negative', text:`<strong>نسبة رفض اللوكيشن مرتفعة (${kpis.locDenyRate}%)</strong> — يؤثر سلباً على دقة توجيه العميل للفرع الأقرب.` });
-  else if (kpis.locDenyRate > 15) insights.push({ emoji:'📍', type:'warning', text:`<strong>نسبة رفض اللوكيشن (${kpis.locDenyRate}%)</strong> — يُنصح بتوضيح سبب طلب الموقع للعميل.` });
+  if (kpis.exitRate > 40) insights.push({ emoji:'🚪', type:'negative', text:`<strong>الخروج بدون Action مرتفع (${kpis.exitRate}%)</strong> — خسارة واضحة قبل التواصل مع الفرع.` });
+  else if (kpis.exitRate > 20) insights.push({ emoji:'🚪', type:'warning', text:`<strong>الخروج بدون Action (${kpis.exitRate}%)</strong> — يحتاج تحسين الرسالة أو الأزرار.` });
 
-  // Exit rate
-  if (kpis.exitRate > 40) insights.push({ emoji:'🚪', type:'negative', text:`<strong>الخروج بدون تفاعل مرتفع (${kpis.exitRate}%)</strong> — نحن نخسر نصف الزوار قبل إتمام أي إجراء.` });
-  else if (kpis.exitRate > 20) insights.push({ emoji:'🚪', type:'warning', text:`<strong>الخروج بدون تفاعل (${kpis.exitRate}%)</strong> — ربع الزوار يغادرون دون نقر. راجع تجربة اختيار الفرع.` });
+  const auto = s.filter(x => x.whatsappTriggerType === 'auto_redirect').length;
+  const real = s.filter(x => x.conversionQuality === 'real_click' || x.conversionQuality === 'manual_branch_click').length;
+  if (auto > 0) insights.push({ emoji:'🤖', type:'info', text:`<strong>${auto} تحويل واتساب تلقائي</strong> — افصلها عن الضغط الحقيقي عند تحليل نية العميل.` });
+  if (real > 0) insights.push({ emoji:'👆', type:'positive', text:`<strong>${real} تحويل بنقرة فعلية</strong> — هذه أقوى إشارة Intent من العميل.` });
 
-  // Desktop traffic
-  const desktopSessions = s.filter(x => x.deviceType === 'desktop').length;
-  const desktopPct = Math.round(desktopSessions / kpis.total * 100);
-  if (desktopPct > 50) insights.push({ emoji:'💻', type:'info', text:`<strong>حركة ديسكتوب مرتفعة (${desktopPct}%)</strong> — يحتمل وجود اختبارات داخلية. تحقق من الـ IP لاستبعادها.` });
+  const far = s.filter(x => x.isFarBranch).length;
+  if (far > 0) insights.push({ emoji:'📏', type:'warning', text:`<strong>${far} سيشن تم توجيهها لفرع أبعد من 10 كم</strong> — راجع تغطية التوصيل والفرع المختار.` });
 
-  // Branch concentration
   const branchCounts = {};
-  s.forEach(x => { const b = x.selectedBranchName || x.branchName; if(b) branchCounts[b] = (branchCounts[b]||0)+1; });
-  const sorted = Object.entries(branchCounts).sort((a,b)=>b[1]-a[1]);
-  if (sorted.length > 0) {
-    const topBranch = sorted[0];
-    const topPct = Math.round(topBranch[1] / kpis.total * 100);
-    insights.push({ emoji:'🏪', type:'info', text:`<strong>أكثر فرع تحويلاً: ${topBranch[0]}</strong> — استقطب ${topPct}% من إجمالي السيشنز.` });
-  }
+  s.forEach(x => { const b = x.selectedBranchName || x.branchName; if (b) branchCounts[b] = (branchCounts[b] || 0) + 1; });
+  const top = Object.entries(branchCounts).sort((a,b)=>b[1]-a[1])[0];
+  if (top) insights.push({ emoji:'🏪', type:'info', text:`<strong>أكثر فرع استقبل توجيهات: ${safeHtml(top[0])}</strong> — ${top[1]} سيشن من إجمالي ${kpis.total}.` });
 
-  // Manual fallback
-  const manualFallback = s.filter(x => x.hasManualFallback).length;
-  const manualPct = Math.round(manualFallback / kpis.total * 100);
-  if (manualPct > 20) insights.push({ emoji:'🗂️', type:'warning', text:`<strong>${manualPct}% من العملاء رأوا قائمة الفروع اليدوية</strong> — يشير لاحتكاك في خدمة GPS. راجع أسباب رفض اللوكيشن.` });
-
-  // Sheet load errors
   const sheetErrors = s.filter(x => x.sheetLoadStatus && x.sheetLoadStatus !== 'success').length;
-  if (sheetErrors > 0) insights.push({ emoji:'⚙️', type:'negative', text:`<strong>${sheetErrors} سيشن تأثرت بخطأ تحميل بيانات الفروع</strong> — تأكد من استقرار Google Sheet وصلاحيات الوصول.` });
-
-  // Maps clicks
-  if (kpis.sessionsMaps.length > 0) {
-    const mapPct = Math.round(kpis.sessionsMaps.length / kpis.total * 100);
-    insights.push({ emoji:'🗺️', type:'positive', text:`<strong>${mapPct}% من العملاء نقروا على الخريطة</strong> — شريحة تفضّل التنقل المادي للفرع.` });
-  }
+  if (sheetErrors > 0) insights.push({ emoji:'⚙️', type:'negative', text:`<strong>${sheetErrors} سيشن بها مشكلة تحميل بيانات</strong> — راجع Google Sheet أو Apps Script.` });
 
   return insights.slice(0, 8);
 }
 
-/* ============================================================
-   FUNNEL RENDERER
-   ============================================================ */
 function renderFunnel(s, total) {
   const funnelSteps = [
-    { label: 'فتح الصفحة',      count: s.filter(x=>x.events.some(e=>e.eventType==='session_start')).length, color: '#1B2E5E' },
-    { label: 'تحميل الفروع',    count: s.filter(x=>x.hasBranchesLoaded).length, color: '#233B78' },
-    { label: 'طلب اللوكيشن',   count: s.filter(x=>x.hasLocationRequested).length, color: '#1A6E9E' },
-    { label: 'منح اللوكيشن',   count: s.filter(x=>x.hasLocationGranted).length, color: '#1A8FBB' },
-    { label: 'اختيار فرع',      count: s.filter(x=>x.hasBranchSelected||x.selectedBranchId||x.clickedWhatsapp||x.clickedMaps).length, color: '#2AA8D0' },
-    { label: 'نقر WhatsApp',    count: s.filter(x=>x.clickedWhatsapp||x.hasWhatsappClick).length, color: '#3D7A3A' },
-    { label: 'نقر الخريطة',     count: s.filter(x=>x.clickedMaps||x.hasMapsClick).length, color: '#5A9A57' },
+    { label:'صفوف Summary', count: total, color:'#1B2E5E' },
+    { label:'تحميل الفروع نجح', count: s.filter(x=>x.hasBranchesLoaded).length, color:'#233B78' },
+    { label:'لوكيشن معروف', count: s.filter(x=>x.locationPermission !== 'unknown').length, color:'#1A6E9E' },
+    { label:'منح اللوكيشن', count: s.filter(x=>x.hasLocationGranted).length, color:'#1A8FBB' },
+    { label:'تم اختيار فرع', count: s.filter(x=>x.hasBranchSelected).length, color:'#2AA8D0' },
+    { label:'تحويل WhatsApp', count: s.filter(x=>x.clickedWhatsapp).length, color:'#3D7A3A' },
+    { label:'نقر الخريطة', count: s.filter(x=>x.clickedMaps).length, color:'#5A9A57' }
   ];
 
   const maxCount = funnelSteps[0].count || 1;
-
   document.getElementById('funnelContainer').innerHTML = funnelSteps.map((step, i) => {
     const pctTotal = Math.round(step.count / total * 100);
-    const pctPrev  = i > 0 && funnelSteps[i-1].count > 0 ? Math.round(step.count / funnelSteps[i-1].count * 100) : null;
-    const width    = Math.max(5, Math.round(step.count / maxCount * 100));
-    const drop     = pctPrev !== null && pctPrev < 80 ? `↓ ${100-pctPrev}% من السابقة` : '';
-
+    const pctPrev = i > 0 && funnelSteps[i-1].count > 0 ? Math.round(step.count / funnelSteps[i-1].count * 100) : null;
+    const width = Math.max(5, Math.round(step.count / maxCount * 100));
+    const drop = pctPrev !== null && pctPrev < 80 ? `↓ ${100-pctPrev}% من السابقة` : '';
     return `<div class="funnel-step">
-      <div class="funnel-step-label">${step.label}</div>
+      <div class="funnel-step-label">${safeHtml(step.label)}</div>
       <div class="funnel-bar-wrap">
         <div class="funnel-bar" style="width:${width}%;background:${step.color}">
           <span class="funnel-bar-count">${step.count}</span>
         </div>
       </div>
-      <div class="funnel-pct">
-        <div>${pctTotal}%</div>
-        ${drop ? `<div class="funnel-drop">${drop}</div>` : ''}
-      </div>
+      <div class="funnel-pct"><div>${pctTotal}%</div>${drop ? `<div class="funnel-drop">${drop}</div>` : ''}</div>
     </div>`;
   }).join('');
 }
 
-/* ============================================================
-   CONVERSION CHART
-   ============================================================ */
 function renderConversionChart(s, waCount, mapsCount, noAction, denied) {
-  const ctx = document.getElementById('conversionChart').getContext('2d');
+  const canvas = document.getElementById('conversionChart');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
   if (charts.conversion) charts.conversion.destroy();
-  const other = Math.max(0, s.length - waCount - mapsCount - noAction - denied);
+  const errors = s.filter(x => x.hasError).length;
+  const other = Math.max(0, s.length - waCount - mapsCount - noAction - denied - errors);
   charts.conversion = new Chart(ctx, {
     type: 'doughnut',
     data: {
-      labels: ['WhatsApp ✓','خريطة ✓','بدون action','رفض لوكيشن','أخرى'],
-      datasets: [{ data:[waCount,mapsCount,noAction,denied,other], backgroundColor:['#3D7A3A','#1A8FBB','#B83232','#C97B1A','#8A96B0'], borderWidth:0, hoverOffset:8 }]
+      labels: ['WhatsApp ✓','خريطة ✓','بدون Action','رفض لوكيشن','أخطاء','أخرى'],
+      datasets: [{ data:[waCount,mapsCount,noAction,denied,errors,other], backgroundColor:['#3D7A3A','#1A8FBB','#B83232','#C97B1A','#8A96B0','#DDE3EE'], borderWidth:0, hoverOffset:8 }]
     },
     options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{ font:{size:11}, padding:12, boxWidth:12 } } } }
   });
 }
 
-/* ============================================================
-   BRANCH SUMMARY CARDS
-   ============================================================ */
 function renderBranchSummary(s) {
   const branchMap = {};
   s.forEach(x => {
-    const id   = x.selectedBranchId || x.branchId;
+    const id = x.selectedBranchId || x.branchId;
     const name = x.selectedBranchName || x.branchName;
-    const city = x.selectedBranchCity || x.branchCity;
     if (!id && !name) return;
     const key = id || name;
-    if (!branchMap[key]) branchMap[key] = { id, name, city, sessions:0, wa:0, maps:0, exits:0, distArr:[] };
+    if (!branchMap[key]) branchMap[key] = { id, name, city:x.selectedBranchCity||x.branchCity, sessions:0, wa:0, maps:0, exits:0, distArr:[], far:0 };
     branchMap[key].sessions++;
     if (x.clickedWhatsapp) branchMap[key].wa++;
-    if (x.clickedMaps)     branchMap[key].maps++;
+    if (x.clickedMaps) branchMap[key].maps++;
     if (x.exitedWithoutAction) branchMap[key].exits++;
+    if (x.isFarBranch) branchMap[key].far++;
     const d = x.selectedDistanceKm || x.distanceKm;
-    if (d) branchMap[key].distArr.push(d);
+    if (d !== null && d !== undefined) branchMap[key].distArr.push(d);
   });
-  const branches = Object.values(branchMap);
-  if (!branches.length) { document.getElementById('branchSummaryGrid').innerHTML = '<div class="empty-state"><div class="empty-icon">🏪</div>لا توجد بيانات فروع</div>'; return; }
 
-  const topConv   = branches.sort((a,b)=>(b.wa+b.maps)-(a.wa+a.maps))[0];
-  const mostRouted= branches.sort((a,b)=>b.sessions-a.sessions)[0];
-  const highExit  = branches.sort((a,b)=>b.exits-a.exits)[0];
-  const allDists  = s.map(x=>x.selectedDistanceKm||x.distanceKm).filter(Boolean);
-  const avgDist   = allDists.length ? (allDists.reduce((a,b)=>a+b,0)/allDists.length).toFixed(1) : '—';
+  const branches = Object.values(branchMap);
+  if (!branches.length) {
+    document.getElementById('branchSummaryGrid').innerHTML = '<div class="empty-state"><div class="empty-icon">🏪</div>لا توجد بيانات فروع</div>';
+    return;
+  }
+
+  const byConv = [...branches].sort((a,b)=>(b.wa+b.maps)-(a.wa+a.maps));
+  const byRoute = [...branches].sort((a,b)=>b.sessions-a.sessions);
+  const byExit = [...branches].sort((a,b)=>b.exits-a.exits);
+  const allDists = s.map(x=>x.selectedDistanceKm || x.distanceKm).filter(x=>x !== null && x !== undefined);
+  const avgDist = allDists.length ? (allDists.reduce((a,b)=>a+b,0)/allDists.length).toFixed(1) : '—';
   const delivSess = s.filter(x=>x.selectedDelivery).length;
-  const delivPct  = Math.round(delivSess/s.length*100);
+  const delivPct = Math.round(delivSess/s.length*100);
+  const farSessions = s.filter(x=>x.isFarBranch).length;
 
   document.getElementById('branchSummaryGrid').innerHTML = [
-    { title:'أعلى فرع تحويلاً', value: topConv?.name || '—', sub: topConv ? `${topConv.wa} واتساب · ${topConv.maps} خريطة` : '' },
-    { title:'أكثر فرع توجيهاً', value: mostRouted?.name || '—', sub: mostRouted ? `${mostRouted.sessions} سيشن` : '' },
-    { title:'أعلى فرع خروجاً', value: highExit?.name || '—', sub: highExit ? `${highExit.exits} خروج بدون action` : '' },
-    { title:'متوسط المسافة للفرع', value: avgDist + ' كم', sub: 'متوسط المسافة للفروع المختارة' },
+    { title:'أعلى فرع تحويلاً', value: byConv[0]?.name || '—', sub: byConv[0] ? `${byConv[0].wa} واتساب · ${byConv[0].maps} خريطة` : '' },
+    { title:'أكثر فرع توجيهاً', value: byRoute[0]?.name || '—', sub: byRoute[0] ? `${byRoute[0].sessions} سيشن` : '' },
+    { title:'أعلى فرع خروجاً', value: byExit[0]?.name || '—', sub: byExit[0] ? `${byExit[0].exits} خروج بدون Action` : '' },
+    { title:'متوسط المسافة للفرع', value: avgDist + ' كم', sub: 'حسب Selected Branch Distance' },
     { title:'سيشنز بخدمة توصيل', value: delivPct + '%', sub: `${delivSess} من أصل ${s.length} سيشن` },
-    { title:'إجمالي الفروع النشطة', value: branches.length, sub: 'فروع تلقّت توجيهات في هذه الفترة' },
+    { title:'فروع بعيدة +10 كم', value: farSessions, sub: 'مهم لمراجعة التغطية' }
   ].map(c => `<div class="branch-stat-card">
-    <div class="branch-stat-title">${c.title}</div>
-    <div class="branch-stat-value">${c.value}</div>
-    <div class="branch-stat-sub">${c.sub}</div>
+    <div class="branch-stat-title">${safeHtml(c.title)}</div>
+    <div class="branch-stat-value">${safeHtml(c.value)}</div>
+    <div class="branch-stat-sub">${safeHtml(c.sub)}</div>
   </div>`).join('');
 }
 
-/* ============================================================
-   TOP BRANCHES TABLE
-   ============================================================ */
 function renderBranchesTable(s) {
   const branchMap = {};
   s.forEach(x => {
-    const id   = x.selectedBranchId || x.branchId;
+    const id = x.selectedBranchId || x.branchId;
     const name = x.selectedBranchName || x.branchName;
-    const city = x.selectedBranchCity || x.branchCity;
-    const dist = x.selectedBranchDistrict || x.branchDistrict;
     if (!name) return;
     const key = id || name;
-    if (!branchMap[key]) branchMap[key] = {id:id||'—',name,city,district:dist,sessions:0,wa:0,maps:0,distArr:[],delivery:0};
+    if (!branchMap[key]) branchMap[key] = { id:id||'—', name, city:x.selectedBranchCity||x.branchCity, district:x.selectedBranchDistrict||x.branchDistrict, sessions:0, wa:0, maps:0, distArr:[], delivery:0, far:0 };
     branchMap[key].sessions++;
     if (x.clickedWhatsapp) branchMap[key].wa++;
-    if (x.clickedMaps)     branchMap[key].maps++;
+    if (x.clickedMaps) branchMap[key].maps++;
     if (x.selectedDelivery || x.deliveryAvailable) branchMap[key].delivery++;
+    if (x.isFarBranch) branchMap[key].far++;
     const d = x.selectedDistanceKm || x.distanceKm;
-    if (d) branchMap[key].distArr.push(d);
+    if (d !== null && d !== undefined) branchMap[key].distArr.push(d);
   });
 
   const rows = Object.values(branchMap)
@@ -1279,12 +1212,12 @@ function renderBranchesTable(s) {
     .slice(0,10)
     .map(b => {
       const convRate = Math.round((b.wa+b.maps)/b.sessions*100);
-      const avgDist  = b.distArr.length ? (b.distArr.reduce((a,x)=>a+x,0)/b.distArr.length).toFixed(1) : '—';
+      const avgDist = b.distArr.length ? (b.distArr.reduce((a,x)=>a+x,0)/b.distArr.length).toFixed(1) : '—';
       const cls = convRate>=60?'conv-rate-high':convRate>=30?'conv-rate-med':'conv-rate-low';
       return `<tr>
-        <td><strong>${b.name}</strong></td>
-        <td>${b.city||'—'}</td>
-        <td>${b.district||'—'}</td>
+        <td><strong>${safeHtml(b.name)}</strong></td>
+        <td>${safeHtml(b.city||'—')}</td>
+        <td>${safeHtml(b.district||'—')}</td>
         <td>${b.sessions}</td>
         <td>${b.wa}</td>
         <td>${b.maps}</td>
@@ -1295,37 +1228,30 @@ function renderBranchesTable(s) {
     }).join('');
 
   document.getElementById('branchesTable').innerHTML = `<table>
-    <thead><tr>
-      <th>اسم الفرع</th><th>المدينة</th><th>الحي</th>
-      <th>السيشنز</th><th>واتساب</th><th>خريطة</th>
-      <th>معدل التحويل</th><th>متوسط المسافة</th><th>توصيل</th>
-    </tr></thead>
+    <thead><tr><th>اسم الفرع</th><th>المدينة</th><th>الحي</th><th>السيشنز</th><th>واتساب</th><th>خريطة</th><th>معدل التحويل</th><th>متوسط المسافة</th><th>توصيل</th></tr></thead>
     <tbody>${rows || '<tr><td colspan="9" style="text-align:center;color:var(--text-muted)">لا توجد بيانات</td></tr>'}</tbody>
   </table>`;
 }
 
-/* ============================================================
-   SOURCE PERFORMANCE
-   ============================================================ */
 function renderSourcePerf(s) {
   const srcMap = {};
   s.forEach(x => {
-    let src = x.sourceType || x.utmSource || 'مباشر';
-    if (!src || src === 'direct' || src === '') src = 'مباشر';
-    if (!srcMap[src]) srcMap[src] = {sessions:0, converted:0, granted:0, exited:0};
+    const src = x.trafficChannel || x.sourceType || 'direct';
+    if (!srcMap[src]) srcMap[src] = {sessions:0, converted:0, granted:0, exited:0, business:0};
     srcMap[src].sessions++;
-    if (x.clickedWhatsapp||x.clickedMaps) srcMap[src].converted++;
+    if (x.clickedWhatsapp || x.clickedMaps) srcMap[src].converted++;
     if (x.hasLocationGranted) srcMap[src].granted++;
     if (x.exitedWithoutAction) srcMap[src].exited++;
+    if (x.isValidBusinessSession) srcMap[src].business++;
   });
 
   const rows = Object.entries(srcMap).sort((a,b)=>b[1].sessions-a[1].sessions).map(([src, d]) => {
-    const convR  = Math.round(d.converted/d.sessions*100);
+    const convR = Math.round(d.converted/d.sessions*100);
     const grantR = Math.round(d.granted/d.sessions*100);
-    const exitR  = Math.round(d.exited/d.sessions*100);
+    const exitR = Math.round(d.exited/d.sessions*100);
     const cls = convR>=50?'conv-rate-high':convR>=25?'conv-rate-med':'conv-rate-low';
     return `<div class="source-row">
-      <div class="source-name">${src}</div>
+      <div class="source-name">${safeHtml(src)}</div>
       <div class="source-metric"><span>${d.sessions}</span>سيشن</div>
       <div class="source-metric"><span class="${cls}">${convR}%</span>تحويل</div>
       <div class="source-metric"><span>${grantR}%</span>موافقة</div>
@@ -1342,100 +1268,91 @@ function renderSourcePerf(s) {
       <div class="source-header" style="text-align:center">موافقة</div>
       <div class="source-header" style="text-align:center">خروج</div>
     </div>
-    ${rows || '<div class="empty-state">لا توجد بيانات</div>'}
-  `;
+    ${rows || '<div class="empty-state">لا توجد بيانات</div>'}`;
 }
 
-/* ============================================================
-   DEVICE CHART
-   ============================================================ */
 function renderDeviceChart(s) {
   const devMap = {};
-  s.forEach(x => { const d = x.deviceType||'unknown'; devMap[d]=(devMap[d]||0)+1; });
-  const ctx = document.getElementById('deviceChart').getContext('2d');
+  s.forEach(x => { const d = x.deviceType || 'unknown'; devMap[d] = (devMap[d] || 0) + 1; });
+  const canvas = document.getElementById('deviceChart');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
   if (charts.device) charts.device.destroy();
   charts.device = new Chart(ctx, {
     type: 'pie',
     data: {
-      labels: Object.keys(devMap).map(k => ({mobile:'موبايل',desktop:'ديسكتوب',tablet:'تابلت'}[k]||k)),
+      labels: Object.keys(devMap).map(k => ({mobile:'موبايل',desktop:'ديسكتوب',tablet:'تابلت',unknown:'غير معروف'}[k] || k)),
       datasets: [{ data: Object.values(devMap), backgroundColor:['#1A8FBB','#1B2E5E','#3D7A3A','#C97B1A'], borderWidth:0 }]
     },
     options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{ font:{size:11}, padding:12, boxWidth:12 } } } }
   });
 }
 
-/* ============================================================
-   JOURNEY HEALTH
-   ============================================================ */
-function renderJourneyHealth(s, waCount, mapsCount, noAction, granted, denied) {
-  const closedBefore  = s.filter(x=>x.closedBeforePermission).length;
-  const deniedLeft    = s.filter(x=>x.hasLocationDenied && x.exitedWithoutAction).length;
-  const branchNoClick = s.filter(x=>(x.hasBranchSelected||x.selectedBranchId) && !x.clickedWhatsapp && !x.clickedMaps).length;
-  const manualNoClick = s.filter(x=>x.hasManualFallback && !x.clickedWhatsapp && !x.clickedMaps).length;
+function renderJourneyHealth(s, waCount, mapsCount, noAction) {
+  const closedBefore = s.filter(x=>x.closedBeforePermission).length;
+  const deniedLeft = s.filter(x=>x.hasLocationDenied && x.exitedWithoutAction).length;
+  const branchNoClick = s.filter(x=>x.hasBranchSelected && !x.clickedWhatsapp && !x.clickedMaps).length;
+  const autoRedirect = s.filter(x=>x.whatsappTriggerType === 'auto_redirect').length;
+  const farBranch = s.filter(x=>x.isFarBranch).length;
 
   const items = [
-    { label:'أُغلق قبل طلب اللوكيشن', value:closedBefore, icon:'⏩', color:'var(--amber)' },
-    { label:'رفض اللوكيشن وغادر',       value:deniedLeft,  icon:'🚫', color:'var(--red)' },
-    { label:'اختار فرع ولم ينقر',        value:branchNoClick, icon:'🤔', color:'var(--amber)' },
-    { label:'عرض يدوي ولم ينقر',         value:manualNoClick, icon:'📋', color:'var(--amber)' },
-    { label:'تحويل WhatsApp ✓',           value:waCount,    icon:'✅', color:'var(--green)' },
-    { label:'تحويل خريطة ✓',             value:mapsCount,  icon:'✅', color:'var(--green)' },
+    { label:'أُغلق قبل اللوكيشن', value:closedBefore, icon:'⏩', color:'var(--amber)' },
+    { label:'رفض اللوكيشن وغادر', value:deniedLeft, icon:'🚫', color:'var(--red)' },
+    { label:'اختار فرع ولم ينقر', value:branchNoClick, icon:'🤔', color:'var(--amber)' },
+    { label:'تحويل تلقائي واتساب', value:autoRedirect, icon:'🤖', color:'var(--ocean)' },
+    { label:'فرع بعيد +10 كم', value:farBranch, icon:'📏', color:'var(--amber)' },
+    { label:'تحويل WhatsApp ✓', value:waCount, icon:'✅', color:'var(--green)' },
+    { label:'تحويل خريطة ✓', value:mapsCount, icon:'🗺️', color:'var(--green)' }
   ];
 
   document.getElementById('journeyGrid').innerHTML = items.map(i => `
     <div class="journey-card">
-      <div class="journey-label">${i.label}</div>
+      <div class="journey-label">${safeHtml(i.label)}</div>
       <div class="journey-value" style="color:${i.color}">${i.icon} ${i.value}</div>
       <div class="journey-sub">${Math.round(i.value/s.length*100)}% من السيشنز</div>
     </div>`).join('');
 }
 
-/* ============================================================
-   TECHNICAL HEALTH
-   ============================================================ */
 function renderTechHealth(s, sheetSucc, sheetLoadMs) {
-  const sheetTotal   = s.filter(x=>x.sheetLoadStatus).length;
+  const sheetTotal = s.filter(x=>x.sheetLoadStatus).length;
   const sheetSuccPct = sheetTotal ? Math.round(sheetSucc.length/sheetTotal*100) : 100;
-  const geoErrors    = s.filter(x=>x.locationError && x.locationError !== '').length;
-  const errorStages  = {};
-  s.forEach(x => { if(x.errorStage && x.errorStage!=='none') errorStages[x.errorStage]=(errorStages[x.errorStage]||0)+1; });
+  const geoErrors = s.filter(x=>x.locationError && x.locationError !== '').length;
+  const errorStages = {};
+  s.forEach(x => { if (x.failurePoint && x.failurePoint !== 'none') errorStages[x.failurePoint] = (errorStages[x.failurePoint] || 0) + 1; });
   const topErr = Object.entries(errorStages).sort((a,b)=>b[1]-a[1])[0];
   const browsers = {}, oss = {};
-  s.forEach(x => { if(x.browser){browsers[x.browser]=(browsers[x.browser]||0)+1;} if(x.os){oss[x.os]=(oss[x.os]||0)+1;} });
+  s.forEach(x => { if (x.browser) browsers[x.browser]=(browsers[x.browser]||0)+1; if (x.os) oss[x.os]=(oss[x.os]||0)+1; });
   const topBrowser = Object.entries(browsers).sort((a,b)=>b[1]-a[1])[0];
-  const topOS      = Object.entries(oss).sort((a,b)=>b[1]-a[1])[0];
+  const topOS = Object.entries(oss).sort((a,b)=>b[1]-a[1])[0];
 
   const items = [
-    { label:'نجاح تحميل البيانات', value: sheetSuccPct+'%', sub: `${sheetSucc.length} من ${sheetTotal}` },
-    { label:'متوسط وقت التحميل',   value: sheetLoadMs ? sheetLoadMs+'ms' : '—', sub: 'وقت تحميل Google Sheet' },
-    { label:'أخطاء GPS',           value: geoErrors, sub: 'سيشن بخطأ موقع' },
-    { label:'أكثر متصفح استخداماً',value: topBrowser?.[0] || '—', sub: topBrowser?.[1]+' سيشن' || '' },
-    { label:'أكثر نظام استخداماً', value: topOS?.[0] || '—', sub: topOS?.[1]+' سيشن' || '' },
-    { label:'أكثر مرحلة خطأً',     value: topErr?.[0] || 'لا أخطاء', sub: topErr ? topErr[1]+' مرة' : '' },
+    { label:'نجاح تحميل البيانات', value: sheetSuccPct+'%', sub: `${sheetSucc.length} من ${sheetTotal || s.length}` },
+    { label:'متوسط وقت التحميل', value: sheetLoadMs ? sheetLoadMs+'ms' : '—', sub:'وقت تحميل Google Sheet' },
+    { label:'أخطاء GPS', value: geoErrors, sub:'سيشن بخطأ موقع' },
+    { label:'أكثر متصفح استخداماً', value: topBrowser?.[0] || '—', sub: topBrowser ? topBrowser[1]+' سيشن' : '' },
+    { label:'أكثر نظام استخداماً', value: topOS?.[0] || '—', sub: topOS ? topOS[1]+' سيشن' : '' },
+    { label:'أكثر نقطة فشل', value: topErr?.[0] || 'لا أخطاء', sub: topErr ? topErr[1]+' مرة' : '' }
   ];
 
   document.getElementById('techGrid').innerHTML = items.map(i => `
     <div class="tech-item">
-      <div class="tech-label">${i.label}</div>
-      <div class="tech-value">${i.value}</div>
-      ${i.sub ? `<div class="tech-sub">${i.sub}</div>` : ''}
+      <div class="tech-label">${safeHtml(i.label)}</div>
+      <div class="tech-value">${safeHtml(i.value)}</div>
+      ${i.sub ? `<div class="tech-sub">${safeHtml(i.sub)}</div>` : ''}
     </div>`).join('');
 }
 
-/* ============================================================
-   RAW DATA TABLE (aggregated sessions)
-   ============================================================ */
 function renderRawData(s) {
-  const cols = ['sessionId','date','finalStatus','durationSeconds','locationPermission','selectedBranchName','selectedBranchCity','clickedWhatsapp','clickedMaps','exitedWithoutAction','sourceType','deviceType'];
-  const labels = ['Session ID','التاريخ','الحالة النهائية','المدة (ث)','اللوكيشن','الفرع المختار','المدينة','واتساب','خريطة','خروج بدون action','المصدر','الجهاز'];
+  const cols = ['sessionId','date','finalStatus','durationSeconds','sessionQuality','primaryAction','conversionQuality','selectedBranchName','selectedBranchCity','selectedDistanceKm','trafficChannel','deviceType','isTestSession'];
+  const labels = ['Session ID','التاريخ','الحالة','المدة','جودة السيشن','Action','جودة التحويل','الفرع','المدينة','المسافة','القناة','الجهاز','اختبار؟'];
   const wrap = document.getElementById('rawDataWrap');
   wrap.innerHTML = `<div class="table-card" style="max-height:400px;overflow:auto">
     <table>
-      <thead><tr>${labels.map(l=>`<th>${l}</th>`).join('')}</tr></thead>
+      <thead><tr>${labels.map(l=>`<th>${safeHtml(l)}</th>`).join('')}</tr></thead>
       <tbody>${s.slice(0,100).map(row=>`<tr>${cols.map(c=>{
         const v = row[c];
         if (typeof v === 'boolean') return `<td>${v?'✅':'—'}</td>`;
-        return `<td>${safeHtml(v || '—')}</td>`;
+        return `<td>${safeHtml(v ?? '—')}</td>`;
       }).join('')}</tr>`).join('')}</tbody>
     </table>
     ${s.length>100?`<div style="padding:10px;text-align:center;font-size:12px;color:var(--text-muted)">عرض أول 100 من أصل ${s.length} سيشن</div>`:''}
@@ -1447,39 +1364,39 @@ function toggleRaw() {
   wrap.classList.toggle('open');
 }
 
-/* ============================================================
-   DATA LOADING
-   ============================================================ */
 async function loadData() {
   showLoading(true);
   document.getElementById('errorState').style.display = 'none';
   document.getElementById('mainContent').style.display = 'block';
   document.getElementById('dashboardContent').style.display = 'block';
 
-  const src = DATA_SOURCES.customerSessions;
+  const src = DATA_SOURCES.sessionsSummary;
   const url = src.getUrl();
 
   try {
-    const res  = await fetch(url, { cache: 'no-cache' });
+    const res = await fetch(url, { cache: 'no-cache' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = await res.text();
-    rawRows    = src.parser(text);
+    rawRows = src.parser(text);
+    if (!rawRows.length) throw new Error('Sessions_Summary فارغ أو لا توجد بيانات.');
 
-    if (!rawRows.length) throw new Error('الشيت فارغ أو لا توجد بيانات.');
-
-    normalizedSessions = aggregateSessions(rawRows);
+    normalizedSessions = normalizeSummaryRows(rawRows);
     populateFilters(normalizedSessions);
-    filteredSessions   = [...normalizedSessions];
+
+    const filterDate = document.getElementById('filterDate');
+    if (filterDate && (!filterDate.dataset.initialized)) {
+      filterDate.value = CONFIG.DEFAULT_DATE_FILTER;
+      filterDate.dataset.initialized = 'true';
+    }
+
+    applyFilters();
 
     document.getElementById('lastUpdatedLabel').textContent = 'آخر تحديث: ' + new Date().toLocaleString('ar-SA');
-
-    renderDashboard();
     showLoading(false);
-
   } catch (err) {
     console.error(err);
     showLoading(false);
-    document.getElementById('errorMsg').textContent = err.message || 'تعذّر الاتصال بـ Google Sheet.';
+    document.getElementById('errorMsg').textContent = err.message || 'تعذّر الاتصال بـ Sessions_Summary.';
     document.getElementById('errorState').style.display = 'block';
     document.getElementById('dashboardContent').style.display = 'none';
   }
@@ -1496,9 +1413,6 @@ async function refreshData() {
   btn.classList.remove('spinning');
 }
 
-/* ============================================================
-   INIT
-   ============================================================ */
 window.addEventListener('DOMContentLoaded', () => {
   loadData();
 });
