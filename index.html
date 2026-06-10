@@ -1,0 +1,1482 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ocean Branch Routing Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  /* ===================== DESIGN TOKENS ===================== */
+  :root {
+    --navy: #1B2E5E;
+    --navy-light: #233B78;
+    --ocean: #1A8FBB;
+    --ocean-light: #E8F5FB;
+    --green: #3D7A3A;
+    --green-light: #EAF4EA;
+    --amber: #C97B1A;
+    --amber-light: #FEF5E7;
+    --red: #B83232;
+    --red-light: #FDEAEA;
+    --bg: #F0F4F8;
+    --card: #FFFFFF;
+    --border: #DDE3EE;
+    --text-primary: #1B2E5E;
+    --text-secondary: #556080;
+    --text-muted: #8A96B0;
+    --shadow: 0 2px 12px rgba(27,46,94,0.08);
+    --shadow-hover: 0 6px 24px rgba(27,46,94,0.14);
+    --radius: 12px;
+    --radius-sm: 8px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text-primary);
+    min-height: 100vh;
+    direction: rtl;
+  }
+
+  /* ===================== HEADER ===================== */
+  .header {
+    background: linear-gradient(135deg, var(--navy) 0%, var(--navy-light) 60%, #2A5298 100%);
+    color: white;
+    padding: 24px 32px 20px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 4px 20px rgba(27,46,94,0.25);
+  }
+  .header-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  .header-brand { display: flex; align-items: center; gap: 14px; }
+  .header-logo {
+    width: 46px; height: 46px;
+    background: rgba(255,255,255,0.15);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.2);
+  }
+  .header-title h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
+  .header-title p { font-size: 12px; opacity: 0.75; margin-top: 2px; }
+  .header-meta {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  }
+  .last-updated {
+    font-size: 11px;
+    background: rgba(255,255,255,0.12);
+    padding: 5px 12px;
+    border-radius: 20px;
+    opacity: 0.9;
+    border: 1px solid rgba(255,255,255,0.15);
+  }
+  #refreshBtn {
+    background: rgba(255,255,255,0.18);
+    color: white;
+    border: 1px solid rgba(255,255,255,0.3);
+    padding: 7px 16px;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: inherit;
+    transition: all 0.2s;
+    display: flex; align-items: center; gap: 6px;
+  }
+  #refreshBtn:hover { background: rgba(255,255,255,0.28); }
+  #refreshBtn.spinning .spin { animation: spin 0.8s linear infinite; display: inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ===================== FILTERS ===================== */
+  .filters-bar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding-top: 4px;
+  }
+  .filter-group { display: flex; align-items: center; gap: 6px; }
+  .filter-label { font-size: 11px; opacity: 0.7; white-space: nowrap; }
+  .filter-select, .filter-date {
+    background: rgba(255,255,255,0.12);
+    color: white;
+    border: 1px solid rgba(255,255,255,0.25);
+    padding: 5px 10px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-family: inherit;
+    direction: rtl;
+    cursor: pointer;
+    outline: none;
+    transition: background 0.2s;
+    max-width: 160px;
+  }
+  .filter-select option { background: var(--navy); color: white; }
+  .filter-select:hover, .filter-date:hover { background: rgba(255,255,255,0.2); }
+  .filter-divider { width: 1px; height: 24px; background: rgba(255,255,255,0.2); }
+
+  /* ===================== LAYOUT ===================== */
+  .main { padding: 24px 28px; max-width: 1600px; margin: 0 auto; }
+
+  .section { margin-bottom: 28px; }
+  .section-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  .section-title {
+    font-size: 15px; font-weight: 700; color: var(--navy);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .section-title .dot {
+    width: 4px; height: 22px;
+    background: var(--ocean);
+    border-radius: 2px;
+    display: inline-block;
+  }
+
+  /* ===================== KPI CARDS ===================== */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 14px;
+  }
+  .kpi-card {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 18px 16px 14px;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+    transition: box-shadow 0.2s, transform 0.2s;
+    cursor: default;
+  }
+  .kpi-card:hover { box-shadow: var(--shadow-hover); transform: translateY(-2px); }
+  .kpi-card::before {
+    content: '';
+    position: absolute;
+    top: 0; right: 0; left: 0;
+    height: 3px;
+    border-radius: var(--radius) var(--radius) 0 0;
+  }
+  .kpi-card.good::before { background: var(--green); }
+  .kpi-card.warning::before { background: var(--amber); }
+  .kpi-card.critical::before { background: var(--red); }
+  .kpi-card.neutral::before { background: var(--ocean); }
+
+  .kpi-icon { font-size: 20px; margin-bottom: 8px; }
+  .kpi-value {
+    font-size: 32px; font-weight: 800;
+    color: var(--navy); line-height: 1;
+    letter-spacing: -1px;
+    margin-bottom: 4px;
+  }
+  .kpi-value.large { font-size: 36px; }
+  .kpi-label {
+    font-size: 12px; color: var(--text-secondary);
+    font-weight: 500; margin-bottom: 8px;
+    line-height: 1.3;
+  }
+  .kpi-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 10px; font-weight: 600;
+    padding: 3px 8px; border-radius: 20px;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .badge-good { background: var(--green-light); color: var(--green); }
+  .badge-warning { background: var(--amber-light); color: var(--amber); }
+  .badge-critical { background: var(--red-light); color: var(--red); }
+  .badge-neutral { background: var(--ocean-light); color: var(--ocean); }
+
+  /* ===================== INSIGHTS ===================== */
+  .insights-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 12px;
+  }
+  .insight-card {
+    background: var(--card);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px;
+    display: flex; align-items: flex-start; gap: 12px;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
+    transition: box-shadow 0.2s;
+  }
+  .insight-card:hover { box-shadow: var(--shadow-hover); }
+  .insight-icon {
+    width: 36px; height: 36px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 17px; flex-shrink: 0;
+  }
+  .insight-icon.positive { background: var(--green-light); }
+  .insight-icon.warning { background: var(--amber-light); }
+  .insight-icon.negative { background: var(--red-light); }
+  .insight-icon.info { background: var(--ocean-light); }
+  .insight-text { font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+  .insight-text strong { color: var(--text-primary); font-weight: 600; }
+
+  /* ===================== FUNNEL ===================== */
+  .funnel-container {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 20px;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+  }
+  .funnel-step {
+    display: flex; align-items: center; gap: 16px;
+    margin-bottom: 10px;
+  }
+  .funnel-step-label {
+    font-size: 13px; color: var(--text-secondary);
+    width: 170px; flex-shrink: 0; font-weight: 500;
+    text-align: right;
+  }
+  .funnel-bar-wrap {
+    flex: 1; background: var(--bg); border-radius: 6px; height: 36px; position: relative; overflow: hidden;
+  }
+  .funnel-bar {
+    height: 100%; border-radius: 6px;
+    display: flex; align-items: center; justify-content: flex-end;
+    padding-left: 10px; padding-right: 10px;
+    transition: width 0.8s cubic-bezier(0.4,0,0.2,1);
+    min-width: 40px;
+    position: relative;
+  }
+  .funnel-bar-count {
+    font-size: 13px; font-weight: 700; color: white;
+    white-space: nowrap;
+  }
+  .funnel-pct {
+    font-size: 12px; color: var(--text-muted); width: 90px;
+    text-align: center; flex-shrink: 0;
+  }
+  .funnel-drop { font-size: 10px; color: var(--red); margin-top: 1px; }
+
+  /* ===================== 2-COL GRID ===================== */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+  @media(max-width: 900px) { .two-col, .three-col { grid-template-columns: 1fr; } }
+
+  /* ===================== CHART CARD ===================== */
+  .chart-card {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 20px;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+  }
+  .chart-card h3 {
+    font-size: 13px; font-weight: 700; color: var(--text-secondary);
+    text-transform: uppercase; letter-spacing: 0.5px;
+    margin-bottom: 16px;
+  }
+  .chart-wrap { position: relative; height: 220px; }
+
+  /* ===================== TABLE ===================== */
+  .table-card {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .table-card table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .table-card thead th {
+    background: var(--navy);
+    color: white;
+    padding: 11px 14px;
+    font-weight: 600; font-size: 11px;
+    letter-spacing: 0.4px;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .table-card tbody tr:nth-child(even) { background: #F7F9FC; }
+  .table-card tbody tr:hover { background: var(--ocean-light); }
+  .table-card tbody td { padding: 10px 14px; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
+  .table-card tbody td strong { color: var(--text-primary); }
+  .conv-rate-high { color: var(--green); font-weight: 700; }
+  .conv-rate-med { color: var(--amber); font-weight: 700; }
+  .conv-rate-low { color: var(--red); font-weight: 700; }
+
+  /* ===================== JOURNEY HEALTH ===================== */
+  .journey-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+  .journey-card {
+    background: var(--card); border-radius: var(--radius);
+    padding: 16px; box-shadow: var(--shadow); border: 1px solid var(--border);
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .journey-label { font-size: 12px; color: var(--text-muted); font-weight: 500; }
+  .journey-value { font-size: 26px; font-weight: 800; color: var(--navy); }
+  .journey-sub { font-size: 11px; color: var(--text-muted); }
+
+  /* ===================== SOURCE TABLE ===================== */
+  .source-row { display: grid; grid-template-columns: 1fr auto auto auto auto; gap: 8px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .source-row:last-child { border-bottom: none; }
+  .source-name { font-weight: 600; font-size: 13px; }
+  .source-metric { font-size: 12px; text-align: center; color: var(--text-secondary); }
+  .source-metric span { display: block; font-weight: 700; font-size: 15px; color: var(--text-primary); }
+  .source-header { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600; }
+
+  /* ===================== TECH HEALTH ===================== */
+  .tech-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+  .tech-item {
+    background: var(--card); border-radius: var(--radius-sm);
+    padding: 14px; box-shadow: var(--shadow); border: 1px solid var(--border);
+    text-align: center;
+  }
+  .tech-label { font-size: 11px; color: var(--text-muted); margin-bottom: 6px; }
+  .tech-value { font-size: 20px; font-weight: 800; color: var(--navy); }
+  .tech-sub { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+
+  /* ===================== BRANCH SUMMARY ===================== */
+  .branch-summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+  .branch-stat-card {
+    background: var(--card); border-radius: var(--radius); padding: 16px;
+    box-shadow: var(--shadow); border: 1px solid var(--border);
+  }
+  .branch-stat-title { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 6px; }
+  .branch-stat-value { font-size: 17px; font-weight: 700; color: var(--navy); line-height: 1.2; }
+  .branch-stat-sub { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+
+  /* ===================== RAW DATA ===================== */
+  .raw-toggle {
+    background: none; border: 1px solid var(--border);
+    padding: 8px 16px; border-radius: 8px; cursor: pointer;
+    font-size: 12px; color: var(--text-secondary); font-family: inherit;
+    transition: all 0.2s;
+  }
+  .raw-toggle:hover { background: var(--ocean-light); border-color: var(--ocean); color: var(--ocean); }
+  #rawDataWrap { display: none; margin-top: 12px; overflow-x: auto; }
+  #rawDataWrap.open { display: block; }
+  #rawDataWrap table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  #rawDataWrap th { background: var(--navy); color: white; padding: 8px; text-align: right; white-space: nowrap; }
+  #rawDataWrap td { padding: 7px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  #rawDataWrap tr:nth-child(even) { background: #f8f9fc; }
+
+  /* ===================== LOADING / ERROR ===================== */
+  .loading-overlay {
+    position: fixed; inset: 0;
+    background: rgba(27,46,94,0.85);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    z-index: 9999; color: white; gap: 16px;
+  }
+  .loading-spinner {
+    width: 48px; height: 48px;
+    border: 4px solid rgba(255,255,255,0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  .loading-text { font-size: 16px; font-weight: 600; }
+  .error-box {
+    background: var(--card); border-radius: var(--radius);
+    padding: 40px; text-align: center;
+    box-shadow: var(--shadow); border: 1px solid var(--border);
+    max-width: 480px; margin: 40px auto;
+  }
+  .error-box .error-icon { font-size: 40px; margin-bottom: 12px; }
+  .error-box h3 { color: var(--red); font-size: 18px; margin-bottom: 8px; }
+  .error-box p { color: var(--text-secondary); font-size: 14px; margin-bottom: 16px; }
+  #retryBtn {
+    background: var(--navy); color: white;
+    border: none; padding: 10px 24px; border-radius: 8px;
+    cursor: pointer; font-size: 14px; font-family: inherit;
+    transition: background 0.2s;
+  }
+  #retryBtn:hover { background: var(--ocean); }
+
+  .empty-state {
+    text-align: center; padding: 40px; color: var(--text-muted);
+    font-size: 14px;
+  }
+  .empty-icon { font-size: 32px; margin-bottom: 8px; }
+
+  /* ===================== PROGRESS BAR ===================== */
+  .mini-bar-wrap { background: var(--bg); border-radius: 4px; height: 6px; flex: 1; }
+  .mini-bar { height: 6px; border-radius: 4px; background: var(--ocean); }
+
+  /* ===================== RESPONSIVE ===================== */
+  @media(max-width: 768px) {
+    .main { padding: 16px; }
+    .header { padding: 16px; }
+    .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+    .funnel-step-label { width: 110px; font-size: 11px; }
+    .filters-bar { gap: 8px; }
+  }
+  @media(max-width: 480px) {
+    .kpi-grid { grid-template-columns: 1fr 1fr; }
+    .kpi-value { font-size: 26px; }
+    .header-title h1 { font-size: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- LOADING OVERLAY -->
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="loading-spinner"></div>
+  <div class="loading-text">جاري تحميل البيانات...</div>
+</div>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="header-top">
+    <div class="header-brand">
+      <div class="header-logo">🌊</div>
+      <div class="header-title">
+        <h1>Ocean Branch Routing Dashboard</h1>
+        <p>Executive overview · Customer routing · Branch performance · WhatsApp conversions</p>
+      </div>
+    </div>
+    <div class="header-meta">
+      <span class="last-updated" id="lastUpdatedLabel">آخر تحديث: —</span>
+      <button id="refreshBtn" onclick="refreshData()">
+        <span class="spin">↻</span> تحديث
+      </button>
+    </div>
+  </div>
+  <div class="filters-bar">
+    <div class="filter-group">
+      <span class="filter-label">الفترة:</span>
+      <select class="filter-select" id="filterDate" onchange="applyFilters()">
+        <option value="all">الكل</option>
+        <option value="today">اليوم</option>
+        <option value="yesterday">أمس</option>
+        <option value="7d">آخر 7 أيام</option>
+        <option value="30d">آخر 30 يوم</option>
+      </select>
+    </div>
+    <div class="filter-divider"></div>
+    <div class="filter-group">
+      <span class="filter-label">المدينة:</span>
+      <select class="filter-select" id="filterCity" onchange="applyFilters()">
+        <option value="all">الكل</option>
+      </select>
+    </div>
+    <div class="filter-divider"></div>
+    <div class="filter-group">
+      <span class="filter-label">المصدر:</span>
+      <select class="filter-select" id="filterSource" onchange="applyFilters()">
+        <option value="all">الكل</option>
+      </select>
+    </div>
+    <div class="filter-divider"></div>
+    <div class="filter-group">
+      <span class="filter-label">الجهاز:</span>
+      <select class="filter-select" id="filterDevice" onchange="applyFilters()">
+        <option value="all">الكل</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN CONTENT -->
+<div class="main" id="mainContent" style="display:none">
+
+  <!-- ERROR STATE -->
+  <div id="errorState" style="display:none">
+    <div class="error-box">
+      <div class="error-icon">⚠️</div>
+      <h3>تعذر تحميل البيانات</h3>
+      <p id="errorMsg">يرجى التحقق من رابط Google Sheet والمحاولة مجدداً.</p>
+      <button id="retryBtn" onclick="refreshData()">إعادة المحاولة</button>
+    </div>
+  </div>
+
+  <!-- DASHBOARD CONTENT -->
+  <div id="dashboardContent">
+
+    <!-- A. KPI CARDS -->
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title"><span class="dot"></span>مؤشرات الأداء الرئيسية</div>
+      </div>
+      <div class="kpi-grid" id="kpiGrid">
+        <div class="empty-state"><div class="empty-icon">📊</div>جاري التحميل...</div>
+      </div>
+    </div>
+
+    <!-- B. EXECUTIVE INSIGHTS -->
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title"><span class="dot"></span>تحليلات تنفيذية</div>
+      </div>
+      <div class="insights-grid" id="insightsGrid"></div>
+    </div>
+
+    <!-- C. FUNNEL + CONVERSION CHART -->
+    <div class="two-col section">
+      <div>
+        <div class="section-header">
+          <div class="section-title"><span class="dot"></span>مسار العميل</div>
+        </div>
+        <div class="funnel-container" id="funnelContainer"></div>
+      </div>
+      <div>
+        <div class="section-header">
+          <div class="section-title"><span class="dot"></span>نتائج التحويل</div>
+        </div>
+        <div class="chart-card" style="height:100%">
+          <h3>توزيع نتائج السيشنز</h3>
+          <div class="chart-wrap"><canvas id="conversionChart"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- D. BRANCH SUMMARY -->
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title"><span class="dot"></span>ملخص الفروع</div>
+      </div>
+      <div class="branch-summary-grid" id="branchSummaryGrid"></div>
+    </div>
+
+    <!-- E. TOP BRANCHES TABLE -->
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title"><span class="dot"></span>أعلى الفروع تحويلاً</div>
+      </div>
+      <div class="table-card" id="branchesTable"></div>
+    </div>
+
+    <!-- F. SOURCE PERFORMANCE + DEVICE -->
+    <div class="two-col section">
+      <div>
+        <div class="section-header">
+          <div class="section-title"><span class="dot"></span>أداء المصادر</div>
+        </div>
+        <div class="chart-card" id="sourcePerformance"></div>
+      </div>
+      <div>
+        <div class="section-header">
+          <div class="section-title"><span class="dot"></span>توزيع الأجهزة</div>
+        </div>
+        <div class="chart-card">
+          <h3>نوع الجهاز</h3>
+          <div class="chart-wrap"><canvas id="deviceChart"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- G. CUSTOMER JOURNEY HEALTH -->
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title"><span class="dot"></span>صحة رحلة العميل</div>
+      </div>
+      <div class="journey-grid" id="journeyGrid"></div>
+    </div>
+
+    <!-- H. TECHNICAL HEALTH -->
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title"><span class="dot"></span>الصحة التقنية</div>
+      </div>
+      <div class="tech-grid" id="techGrid"></div>
+    </div>
+
+    <!-- I. RAW DATA (Collapsed) -->
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title"><span class="dot"></span>بيانات السيشنز المجمّعة</div>
+        <button class="raw-toggle" onclick="toggleRaw()">عرض / إخفاء البيانات</button>
+      </div>
+      <div id="rawDataWrap"></div>
+    </div>
+
+  </div><!-- end dashboardContent -->
+</div><!-- end main -->
+
+<script>
+/* ================================================================
+   ██████╗  █████╗ ████████╗ █████╗     ██╗      █████╗ ██╗   ██╗███████╗██████╗
+   ██╔══██╗██╔══██╗╚══██╔══╝██╔══██╗    ██║     ██╔══██╗╚██╗ ██╔╝██╔════╝██╔══██╗
+   ██║  ██║███████║   ██║   ███████║    ██║     ███████║ ╚████╔╝ █████╗  ██████╔╝
+   ██║  ██║██╔══██║   ██║   ██╔══██║    ██║     ██╔══██║  ╚██╔╝  ██╔══╝  ██╔══██╗
+   ██████╔╝██║  ██║   ██║   ██║  ██║    ███████╗██║  ██║   ██║   ███████╗██║  ██║
+   ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝    ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝
+================================================================ */
+
+/* ============================================================
+   CONFIGURATION — تغيير الروابط هنا فقط
+   ============================================================ */
+const CONFIG = {
+  SHEET_ID: '1R3WiRuJkfL1MzaS9DALY04AtrLHZBcWVovA229bBtps',
+  SHEET_NAME: 'Customer_Sessions',
+};
+
+/* ============================================================
+   DATA SOURCES REGISTRY — Modular architecture
+   Add new backends here without touching dashboard logic
+   ============================================================ */
+const DATA_SOURCES = {
+  customerSessions: {
+    name: 'Customer Sessions',
+    type: 'google_sheet',
+    getUrl: () => `https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(CONFIG.SHEET_NAME)}`,
+    parser: parseGoogleSheetResponse,
+    enabled: true,
+  },
+  /* FUTURE: Branch Redirect Backend */
+  branchRedirects: {
+    name: 'Branch Redirect Backend',
+    type: 'future_api',
+    getUrl: () => '',          // PUT API URL here when ready
+    parser: (raw) => raw,
+    enabled: false,
+  },
+  /* FUTURE: QR Scan Backend */
+  qrScans: {
+    name: 'QR Scans Backend',
+    type: 'future_api',
+    getUrl: () => '',
+    parser: (raw) => raw,
+    enabled: false,
+  },
+  /* FUTURE: Landing Pages Backend */
+  landingPages: {
+    name: 'Landing Pages Backend',
+    type: 'future_api',
+    getUrl: () => '',
+    parser: (raw) => raw,
+    enabled: false,
+  },
+};
+
+/* ============================================================
+   GLOBAL STATE
+   ============================================================ */
+let rawRows = [];          // raw parsed rows from sheet
+let normalizedSessions = []; // one object per unique session (aggregated)
+let filteredSessions = [];   // after filters applied
+let charts = {};             // chart instances
+
+/* ============================================================
+   GOOGLE SHEET PARSER
+   ============================================================ */
+function parseGoogleSheetResponse(rawText) {
+  // Google returns JSONP: google.visualization.Query.setResponse({...})
+  const json = rawText.replace(/^[^\(]+\(/, '').replace(/\);?\s*$/, '');
+  const data = JSON.parse(json);
+  const cols = data.table.cols.map(c => c.label);
+  return (data.table.rows || []).map(row => {
+    const obj = {};
+    cols.forEach((col, i) => {
+      const cell = row.c && row.c[i];
+      obj[col] = cell ? (cell.v !== null && cell.v !== undefined ? cell.v : '') : '';
+    });
+    return obj;
+  });
+}
+
+/* ============================================================
+   ROW → NORMALIZED FIELD MAPPING
+   ============================================================ */
+function mapRow(r) {
+  return {
+    // Identity
+    sessionId:          r['Session ID'] || '',
+    timestamp:          r['Timestamp'] || r['Client Time ISO'] || '',
+    date:               r['Date'] || '',
+    time:               r['Time'] || '',
+    eventType:          (r['Event Type'] || '').toLowerCase().trim(),
+    finalStatus:        (r['Final Status'] || '').toLowerCase().trim(),
+    isFinalRow:         String(r['Is Final Row']).toUpperCase() === 'TRUE',
+    isConversion:       String(r['Is Conversion']).toUpperCase() === 'TRUE',
+    conversionType:     r['Conversion Type'] || '',
+    funnelStep:         r['Funnel Step'] || '',
+    sessionEventNumber: parseInt(r['Session Event Number']) || 0,
+
+    // Duration
+    durationSeconds:    parseFloat(r['Duration Seconds']) || 0,
+
+    // Location
+    locationPermission: (r['Location Permission'] || 'unknown').toLowerCase(),
+    locationError:      r['Location Error'] || '',
+    locationAccuracy:   parseFloat(r['Location Accuracy Meters']) || 0,
+    userLat:            parseFloat(r['User Lat'] || r['User Latitude']) || null,
+    userLng:            parseFloat(r['User Lng'] || r['User Longitude']) || null,
+
+    // Branch (nearest at time of event)
+    branchId:           r['Nearest Branch ID'] || r['Nearest Overall Branch ID'] || '',
+    branchName:         r['Nearest Branch Name'] || r['Nearest Overall Branch Name'] || '',
+    branchCity:         r['Nearest Branch City'] || '',
+    branchDistrict:     r['Nearest Branch District'] || '',
+    distanceKm:         parseFloat(r['Distance KM'] || r['Nearest Overall Distance KM']) || null,
+    deliveryAvailable:  String(r['Delivery Available']).toUpperCase() === 'TRUE',
+
+    // Selected Branch
+    selectedBranchId:   r['Selected Branch ID'] || '',
+    selectedBranchName: r['Selected Branch Name'] || '',
+    selectedBranchCity: r['Selected Branch City'] || '',
+    selectedBranchDistrict: r['Selected Branch District'] || '',
+    selectedDistanceKm: parseFloat(r['Selected Branch Distance KM']) || null,
+    selectedDelivery:   String(r['Selected Branch Delivery Available']).toUpperCase() === 'TRUE',
+
+    // Actions
+    clickedWhatsapp:    String(r['Clicked WhatsApp']).toUpperCase() === 'TRUE',
+    clickedMaps:        String(r['Clicked Maps']).toUpperCase() === 'TRUE',
+    exitedWithoutAction:String(r['Exited Without Action']).toUpperCase() === 'TRUE',
+    exitReason:         r['Exit Reason'] || '',
+
+    // Branch selection method
+    branchSelectionMethod: r['Branch Selection Method'] || '',
+    distanceBucket:     r['Distance Bucket'] || '',
+
+    // Sheet load
+    sheetLoadStatus:    r['Sheet Load Status'] || '',
+    sheetLoadTimeMs:    parseFloat(r['Sheet Load Time MS']) || null,
+    sheetLoadError:     r['Sheet Load Error'] || '',
+    errorStage:         r['Error Stage'] || '',
+    branchesCount:      parseInt(r['Branches Count']) || 0,
+
+    // Traffic
+    sourceType:         r['Source Type'] || '',
+    deviceType:         r['Device Type'] || '',
+    browser:            r['Browser'] || '',
+    os:                 r['OS'] || '',
+    utmSource:          r['UTM Source'] || '',
+    utmMedium:          r['UTM Medium'] || '',
+    utmCampaign:        r['UTM Campaign'] || '',
+    referrer:           r['Referrer'] || '',
+    pageUrl:            r['Page URL'] || '',
+    language:           r['Language'] || '',
+    userAgent:          r['User Agent'] || '',
+
+    // Client time
+    clientTimeISO:      r['Client Time ISO'] || '',
+    clientTimeLocal:    r['Client Time Local'] || '',
+  };
+}
+
+/* ============================================================
+   SESSION AGGREGATION
+   Groups multiple rows per Session ID into one session object
+   ============================================================ */
+function aggregateSessions(rows) {
+  const sessionMap = {};
+
+  rows.forEach(raw => {
+    const r = mapRow(raw);
+    if (!r.sessionId) return;
+
+    if (!sessionMap[r.sessionId]) {
+      sessionMap[r.sessionId] = {
+        sessionId: r.sessionId,
+        events: [],
+        // Fields filled during aggregation:
+        startTime: null,
+        endTime: null,
+        date: r.date,
+        finalStatus: '',
+        isFinalRow: false,
+        isConversion: false,
+        conversionType: '',
+        durationSeconds: 0,
+        locationPermission: 'unknown',
+        locationError: '',
+        locationAccuracy: 0,
+        userLat: null, userLng: null,
+        branchId: '', branchName: '', branchCity: '', branchDistrict: '',
+        distanceKm: null,
+        selectedBranchId: '', selectedBranchName: '', selectedBranchCity: '',
+        selectedBranchDistrict: '', selectedDistanceKm: null, selectedDelivery: false,
+        clickedWhatsapp: false, clickedMaps: false,
+        exitedWithoutAction: false, exitReason: '',
+        branchSelectionMethod: '',
+        distanceBucket: '',
+        sheetLoadStatus: '', sheetLoadTimeMs: null, sheetLoadError: '',
+        errorStage: 'none', branchesCount: 0,
+        sourceType: '', deviceType: '', browser: '', os: '',
+        utmSource: '', utmMedium: '', utmCampaign: '', referrer: '',
+        pageUrl: '', language: '',
+        hasLocationGranted: false,
+        hasLocationDenied: false,
+        hasLocationRequested: false,
+        hasBranchSelected: false,
+        hasBranchesLoaded: false,
+        hasManualFallback: false,
+        hasWhatsappClick: false,
+        hasMapsClick: false,
+        hasSessionEnd: false,
+        closedBeforePermission: false,
+      };
+    }
+
+    const s = sessionMap[r.sessionId];
+    s.events.push(r);
+
+    // Merge fields — always take latest non-empty value for most fields
+    if (r.eventType === 'session_start' && !s.startTime) {
+      s.startTime = r.timestamp || r.clientTimeISO;
+      s.date = r.date;
+    }
+    if (r.eventType === 'session_end') {
+      s.hasSessionEnd = true;
+      s.endTime = r.timestamp || r.clientTimeISO;
+      s.finalStatus = r.finalStatus || s.finalStatus;
+      if (r.exitedWithoutAction) s.exitedWithoutAction = true;
+      if (r.exitReason && r.exitReason !== 'unknown') s.exitReason = r.exitReason;
+    }
+    if (r.isFinalRow) {
+      s.isFinalRow = true;
+      s.finalStatus = r.finalStatus;
+    }
+    if (r.isConversion) {
+      s.isConversion = true;
+      s.conversionType = r.conversionType || s.conversionType;
+    }
+    if (r.durationSeconds > s.durationSeconds) s.durationSeconds = r.durationSeconds;
+
+    // Location
+    if (r.locationPermission === 'granted') { s.locationPermission = 'granted'; s.hasLocationGranted = true; }
+    else if (r.locationPermission === 'denied' && s.locationPermission !== 'granted') { s.locationPermission = 'denied'; s.hasLocationDenied = true; }
+    if (r.locationError) s.locationError = r.locationError;
+    if (r.locationAccuracy > 0) s.locationAccuracy = r.locationAccuracy;
+    if (r.userLat) { s.userLat = r.userLat; s.userLng = r.userLng; }
+
+    // Branch
+    if (r.branchId) { s.branchId = r.branchId; s.branchName = r.branchName; s.branchCity = r.branchCity; s.branchDistrict = r.branchDistrict; s.distanceKm = r.distanceKm; }
+    if (r.selectedBranchId) { s.selectedBranchId = r.selectedBranchId; s.selectedBranchName = r.selectedBranchName; s.selectedBranchCity = r.selectedBranchCity; s.selectedBranchDistrict = r.selectedBranchDistrict; s.selectedDistanceKm = r.selectedDistanceKm; s.selectedDelivery = r.selectedDelivery; }
+
+    // Actions
+    if (r.clickedWhatsapp) s.clickedWhatsapp = true;
+    if (r.clickedMaps) s.clickedMaps = true;
+    if (r.branchesCount > s.branchesCount) s.branchesCount = r.branchesCount;
+    if (r.sheetLoadStatus === 'success') { s.sheetLoadStatus = 'success'; if (r.sheetLoadTimeMs) s.sheetLoadTimeMs = r.sheetLoadTimeMs; }
+    else if (r.sheetLoadStatus && !s.sheetLoadStatus) s.sheetLoadStatus = r.sheetLoadStatus;
+    if (r.sheetLoadError) s.sheetLoadError = r.sheetLoadError;
+    if (r.errorStage && r.errorStage !== 'none') s.errorStage = r.errorStage;
+    if (r.branchSelectionMethod && r.branchSelectionMethod !== 'unknown') s.branchSelectionMethod = r.branchSelectionMethod;
+    if (r.distanceBucket && r.distanceBucket !== 'unknown') s.distanceBucket = r.distanceBucket;
+
+    // Traffic — take from first event
+    if (!s.sourceType) s.sourceType = r.sourceType;
+    if (!s.deviceType) s.deviceType = r.deviceType;
+    if (!s.browser) s.browser = r.browser;
+    if (!s.os) s.os = r.os;
+    if (!s.utmSource) s.utmSource = r.utmSource;
+    if (!s.utmMedium) s.utmMedium = r.utmMedium;
+    if (!s.utmCampaign) s.utmCampaign = r.utmCampaign;
+    if (!s.referrer) s.referrer = r.referrer;
+    if (!s.pageUrl) s.pageUrl = r.pageUrl;
+    if (!s.language) s.language = r.language;
+
+    // Event flags
+    if (r.eventType === 'location_requested') s.hasLocationRequested = true;
+    if (r.eventType === 'location_granted') s.hasLocationGranted = true;
+    if (r.eventType === 'location_denied') s.hasLocationDenied = true;
+    if (r.eventType === 'branch_selected') s.hasBranchSelected = true;
+    if (r.eventType === 'branches_loaded') s.hasBranchesLoaded = true;
+    if (r.eventType === 'manual_fallback_shown') s.hasManualFallback = true;
+    if (r.eventType === 'whatsapp_click') { s.hasWhatsappClick = true; s.clickedWhatsapp = true; s.isConversion = true; }
+    if (r.eventType === 'maps_click') { s.hasMapsClick = true; s.clickedMaps = true; s.isConversion = true; }
+  });
+
+  // Post-process
+  Object.values(sessionMap).forEach(s => {
+    // Final status fallback
+    if (!s.finalStatus) {
+      const statuses = s.events.map(e => e.finalStatus).filter(Boolean);
+      s.finalStatus = statuses[statuses.length - 1] || 'unknown';
+    }
+    // Closed before permission: session end without ever requesting location
+    if (s.hasSessionEnd && !s.hasLocationRequested && !s.hasLocationGranted) {
+      s.closedBeforePermission = true;
+    }
+    // isConversion: whatsapp or maps
+    if (s.clickedWhatsapp || s.clickedMaps) s.isConversion = true;
+  });
+
+  return Object.values(sessionMap);
+}
+
+/* ============================================================
+   DATE FILTER HELPER
+   ============================================================ */
+function getDateRange(filter) {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  switch (filter) {
+    case 'today':     return [today, new Date(today.getTime() + 86400000)];
+    case 'yesterday': return [new Date(today.getTime() - 86400000), today];
+    case '7d':        return [new Date(today.getTime() - 7 * 86400000), new Date(today.getTime() + 86400000)];
+    case '30d':       return [new Date(today.getTime() - 30 * 86400000), new Date(today.getTime() + 86400000)];
+    default:          return null;
+  }
+}
+
+function parseSessionDate(s) {
+  if (s.clientTimeISO) return new Date(s.clientTimeISO);
+  if (s.startTime) return new Date(s.startTime);
+  if (s.date) return new Date(s.date);
+  return null;
+}
+
+/* ============================================================
+   APPLY FILTERS
+   ============================================================ */
+function applyFilters() {
+  const dateFilter  = document.getElementById('filterDate').value;
+  const cityFilter  = document.getElementById('filterCity').value;
+  const srcFilter   = document.getElementById('filterSource').value;
+  const devFilter   = document.getElementById('filterDevice').value;
+
+  const dateRange = getDateRange(dateFilter);
+
+  filteredSessions = normalizedSessions.filter(s => {
+    if (dateRange) {
+      const d = parseSessionDate(s);
+      if (!d || d < dateRange[0] || d >= dateRange[1]) return false;
+    }
+    if (cityFilter !== 'all' && (s.selectedBranchCity || s.branchCity) !== cityFilter) return false;
+    if (srcFilter  !== 'all' && s.sourceType !== srcFilter) return false;
+    if (devFilter  !== 'all' && s.deviceType !== devFilter) return false;
+    return true;
+  });
+
+  renderDashboard();
+}
+
+/* ============================================================
+   POPULATE FILTER DROPDOWNS
+   ============================================================ */
+function populateFilters(sessions) {
+  const cities  = [...new Set(sessions.map(s => s.selectedBranchCity || s.branchCity).filter(Boolean))].sort();
+  const sources = [...new Set(sessions.map(s => s.sourceType).filter(Boolean))].sort();
+  const devices = [...new Set(sessions.map(s => s.deviceType).filter(Boolean))].sort();
+
+  function fillSelect(id, values, labels) {
+    const el = document.getElementById(id);
+    const cur = el.value;
+    while (el.options.length > 1) el.remove(1);
+    values.forEach((v, i) => {
+      const o = document.createElement('option');
+      o.value = v; o.text = (labels && labels[i]) || v;
+      el.appendChild(o);
+    });
+    if ([...el.options].some(o => o.value === cur)) el.value = cur;
+  }
+
+  fillSelect('filterCity',   cities);
+  fillSelect('filterSource', sources);
+  fillSelect('filterDevice', devices);
+}
+
+/* ============================================================
+   RENDER DASHBOARD
+   ============================================================ */
+function renderDashboard() {
+  const s = filteredSessions;
+  const total = s.length;
+
+  if (total === 0) {
+    document.getElementById('dashboardContent').innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">📭</div>
+        <div>لا توجد بيانات للفترة أو الفلتر المحدد.</div>
+      </div>`;
+    return;
+  }
+
+  // ---- KPIs ----
+  const sessionsWithLocationRequested = s.filter(x => x.hasLocationRequested);
+  const sessionsGranted   = s.filter(x => x.hasLocationGranted);
+  const sessionsDenied    = s.filter(x => x.hasLocationDenied);
+  const sessionsWithBranch = s.filter(x => x.hasBranchSelected || x.clickedWhatsapp || x.clickedMaps || x.selectedBranchId);
+  const sessionsWA        = s.filter(x => x.clickedWhatsapp || x.hasWhatsappClick);
+  const sessionsMaps      = s.filter(x => x.clickedMaps || x.hasMapsClick);
+  const sessionsNoAction  = s.filter(x => x.exitedWithoutAction || x.finalStatus === 'exited_without_action');
+  const sessionsWithEnd   = s.filter(x => x.hasSessionEnd && x.durationSeconds > 0);
+  const avgDuration       = sessionsWithEnd.length ? Math.round(sessionsWithEnd.reduce((a,b) => a+b.durationSeconds,0) / sessionsWithEnd.length) : 0;
+  const sheetSucc         = s.filter(x => x.sheetLoadStatus === 'success');
+  const sheetLoadMs       = sheetSucc.length ? Math.round(sheetSucc.reduce((a,b)=>a+(b.sheetLoadTimeMs||0),0)/sheetSucc.length) : 0;
+
+  const pct = (n, d) => d ? Math.round(n/d*100) : 0;
+  const fmt = (n) => n >= 1000 ? (n/1000).toFixed(1)+'K' : n;
+
+  const locGrantRate  = pct(sessionsGranted.length, sessionsWithLocationRequested.length);
+  const locDenyRate   = pct(sessionsDenied.length,  sessionsWithLocationRequested.length);
+  const branchSelRate = pct(sessionsWithBranch.length, total);
+  const waRate        = pct(sessionsWA.length, total);
+  const mapsRate      = pct(sessionsMaps.length, total);
+  const exitRate      = pct(sessionsNoAction.length, total);
+
+  function statusBadge(value, good, warn) {
+    if (value >= good) return ['good','جيد ✓'];
+    if (value >= warn) return ['warning','متوسط ⚡'];
+    return ['critical','يحتاج تحسين ⚠'];
+  }
+  function statusBadgeInv(value, warn, bad) { // lower is better
+    if (value <= warn) return ['good','جيد ✓'];
+    if (value <= bad)  return ['warning','مرتفع ⚡'];
+    return ['critical','مرتفع جداً ⚠'];
+  }
+
+  const kpis = [
+    { icon:'👥', label:'إجمالي السيشنز', value: fmt(total), cls:'neutral', badge:['neutral','إجمالي'] },
+    { icon:'📄', label:'فتح الصفحة', value: fmt(s.filter(x=>x.events.some(e=>e.eventType==='session_start')).length), cls:'neutral', badge:['neutral',''] },
+    { icon:'📍', label:'الموافقة على اللوكيشن', value: locGrantRate+'%', cls: locGrantRate>=70?'good':locGrantRate>=50?'warning':'critical', badge: statusBadge(locGrantRate,70,50) },
+    { icon:'🚫', label:'رفض اللوكيشن', value: locDenyRate+'%', cls: locDenyRate<=15?'good':locDenyRate<=30?'warning':'critical', badge: statusBadgeInv(locDenyRate,15,30) },
+    { icon:'🏪', label:'اختيار فرع', value: branchSelRate+'%', cls: branchSelRate>=60?'good':branchSelRate>=40?'warning':'critical', badge: statusBadge(branchSelRate,60,40) },
+    { icon:'💬', label:'تحويل WhatsApp', value: waRate+'%', cls: waRate>=40?'good':waRate>=20?'warning':'critical', badge: statusBadge(waRate,40,20) },
+    { icon:'🗺️', label:'نقر على الخريطة', value: mapsRate+'%', cls: mapsRate>=20?'good':mapsRate>=10?'warning':'critical', badge: statusBadge(mapsRate,20,10) },
+    { icon:'🚪', label:'خروج بدون action', value: exitRate+'%', cls: exitRate<=20?'good':exitRate<=40?'warning':'critical', badge: statusBadgeInv(exitRate,20,40) },
+    { icon:'⏱️', label:'متوسط مدة السيشن', value: avgDuration+'ث', cls: avgDuration>=5&&avgDuration<=120?'good':'warning', badge: ['neutral',''] },
+    { icon:'📊', label:'معدل تحميل البيانات', value: pct(sheetSucc.length, s.filter(x=>x.sheetLoadStatus).length)+'%', cls: sheetSucc.length ? (pct(sheetSucc.length,s.filter(x=>x.sheetLoadStatus).length)>=90?'good':'warning') : 'neutral', badge:['neutral',''] },
+  ];
+
+  document.getElementById('kpiGrid').innerHTML = kpis.map(k => `
+    <div class="kpi-card ${k.cls}">
+      <div class="kpi-icon">${k.icon}</div>
+      <div class="kpi-value">${k.value}</div>
+      <div class="kpi-label">${k.label}</div>
+      ${k.badge[1] ? `<span class="kpi-badge badge-${k.badge[0]}">${k.badge[1]}</span>` : ''}
+    </div>`).join('');
+
+  // ---- INSIGHTS ----
+  const insights = generateInsights(s, {total, sessionsWA, sessionsMaps, sessionsNoAction, sessionsGranted, sessionsDenied, sessionsWithLocationRequested, sessionsWithBranch, waRate, exitRate, locGrantRate, locDenyRate, sheetSucc, sheetLoadMs});
+  document.getElementById('insightsGrid').innerHTML = insights.map(i => `
+    <div class="insight-card">
+      <div class="insight-icon ${i.type}">${i.emoji}</div>
+      <div class="insight-text">${i.text}</div>
+    </div>`).join('');
+
+  // ---- FUNNEL ----
+  renderFunnel(s, total);
+
+  // ---- CONVERSION CHART ----
+  renderConversionChart(s, sessionsWA.length, sessionsMaps.length, sessionsNoAction.length, sessionsDenied.length);
+
+  // ---- BRANCH SUMMARY ----
+  renderBranchSummary(s);
+
+  // ---- TOP BRANCHES TABLE ----
+  renderBranchesTable(s);
+
+  // ---- SOURCE PERFORMANCE ----
+  renderSourcePerf(s);
+
+  // ---- DEVICE CHART ----
+  renderDeviceChart(s);
+
+  // ---- JOURNEY HEALTH ----
+  renderJourneyHealth(s, sessionsWA.length, sessionsMaps.length, sessionsNoAction.length, sessionsGranted.length, sessionsDenied.length);
+
+  // ---- TECH HEALTH ----
+  renderTechHealth(s, sheetSucc, sheetLoadMs);
+
+  // ---- RAW DATA ----
+  renderRawData(s);
+}
+
+/* ============================================================
+   INSIGHTS GENERATOR
+   ============================================================ */
+function generateInsights(s, kpis) {
+  const insights = [];
+
+  // WhatsApp conversion
+  if (kpis.waRate >= 60) insights.push({ emoji:'🔥', type:'positive', text:`<strong>معدل تحويل WhatsApp ممتاز (${kpis.waRate}%)</strong> — الصفحة تحول بنجاح الغالبية العظمى للعملاء.` });
+  else if (kpis.waRate >= 30) insights.push({ emoji:'💬', type:'warning', text:`<strong>معدل WhatsApp معتدل (${kpis.waRate}%)</strong> — هناك فرصة لتحسين CTA والرسالة التوجيهية.` });
+  else insights.push({ emoji:'⚠️', type:'negative', text:`<strong>معدل WhatsApp منخفض (${kpis.waRate}%)</strong> — يجب مراجعة تجربة المستخدم بعد اختيار الفرع.` });
+
+  // Location denial
+  if (kpis.locDenyRate > 30) insights.push({ emoji:'📍', type:'negative', text:`<strong>نسبة رفض اللوكيشن مرتفعة (${kpis.locDenyRate}%)</strong> — يؤثر سلباً على دقة توجيه العميل للفرع الأقرب.` });
+  else if (kpis.locDenyRate > 15) insights.push({ emoji:'📍', type:'warning', text:`<strong>نسبة رفض اللوكيشن (${kpis.locDenyRate}%)</strong> — يُنصح بتوضيح سبب طلب الموقع للعميل.` });
+
+  // Exit rate
+  if (kpis.exitRate > 40) insights.push({ emoji:'🚪', type:'negative', text:`<strong>الخروج بدون تفاعل مرتفع (${kpis.exitRate}%)</strong> — نحن نخسر نصف الزوار قبل إتمام أي إجراء.` });
+  else if (kpis.exitRate > 20) insights.push({ emoji:'🚪', type:'warning', text:`<strong>الخروج بدون تفاعل (${kpis.exitRate}%)</strong> — ربع الزوار يغادرون دون نقر. راجع تجربة اختيار الفرع.` });
+
+  // Desktop traffic
+  const desktopSessions = s.filter(x => x.deviceType === 'desktop').length;
+  const desktopPct = Math.round(desktopSessions / kpis.total * 100);
+  if (desktopPct > 50) insights.push({ emoji:'💻', type:'info', text:`<strong>حركة ديسكتوب مرتفعة (${desktopPct}%)</strong> — يحتمل وجود اختبارات داخلية. تحقق من الـ IP لاستبعادها.` });
+
+  // Branch concentration
+  const branchCounts = {};
+  s.forEach(x => { const b = x.selectedBranchName || x.branchName; if(b) branchCounts[b] = (branchCounts[b]||0)+1; });
+  const sorted = Object.entries(branchCounts).sort((a,b)=>b[1]-a[1]);
+  if (sorted.length > 0) {
+    const topBranch = sorted[0];
+    const topPct = Math.round(topBranch[1] / kpis.total * 100);
+    insights.push({ emoji:'🏪', type:'info', text:`<strong>أكثر فرع تحويلاً: ${topBranch[0]}</strong> — استقطب ${topPct}% من إجمالي السيشنز.` });
+  }
+
+  // Manual fallback
+  const manualFallback = s.filter(x => x.hasManualFallback).length;
+  const manualPct = Math.round(manualFallback / kpis.total * 100);
+  if (manualPct > 20) insights.push({ emoji:'🗂️', type:'warning', text:`<strong>${manualPct}% من العملاء رأوا قائمة الفروع اليدوية</strong> — يشير لاحتكاك في خدمة GPS. راجع أسباب رفض اللوكيشن.` });
+
+  // Sheet load errors
+  const sheetErrors = s.filter(x => x.sheetLoadStatus && x.sheetLoadStatus !== 'success').length;
+  if (sheetErrors > 0) insights.push({ emoji:'⚙️', type:'negative', text:`<strong>${sheetErrors} سيشن تأثرت بخطأ تحميل بيانات الفروع</strong> — تأكد من استقرار Google Sheet وصلاحيات الوصول.` });
+
+  // Maps clicks
+  if (kpis.sessionsMaps.length > 0) {
+    const mapPct = Math.round(kpis.sessionsMaps.length / kpis.total * 100);
+    insights.push({ emoji:'🗺️', type:'positive', text:`<strong>${mapPct}% من العملاء نقروا على الخريطة</strong> — شريحة تفضّل التنقل المادي للفرع.` });
+  }
+
+  return insights.slice(0, 8);
+}
+
+/* ============================================================
+   FUNNEL RENDERER
+   ============================================================ */
+function renderFunnel(s, total) {
+  const funnelSteps = [
+    { label: 'فتح الصفحة',      count: s.filter(x=>x.events.some(e=>e.eventType==='session_start')).length, color: '#1B2E5E' },
+    { label: 'تحميل الفروع',    count: s.filter(x=>x.hasBranchesLoaded).length, color: '#233B78' },
+    { label: 'طلب اللوكيشن',   count: s.filter(x=>x.hasLocationRequested).length, color: '#1A6E9E' },
+    { label: 'منح اللوكيشن',   count: s.filter(x=>x.hasLocationGranted).length, color: '#1A8FBB' },
+    { label: 'اختيار فرع',      count: s.filter(x=>x.hasBranchSelected||x.selectedBranchId||x.clickedWhatsapp||x.clickedMaps).length, color: '#2AA8D0' },
+    { label: 'نقر WhatsApp',    count: s.filter(x=>x.clickedWhatsapp||x.hasWhatsappClick).length, color: '#3D7A3A' },
+    { label: 'نقر الخريطة',     count: s.filter(x=>x.clickedMaps||x.hasMapsClick).length, color: '#5A9A57' },
+  ];
+
+  const maxCount = funnelSteps[0].count || 1;
+
+  document.getElementById('funnelContainer').innerHTML = funnelSteps.map((step, i) => {
+    const pctTotal = Math.round(step.count / total * 100);
+    const pctPrev  = i > 0 && funnelSteps[i-1].count > 0 ? Math.round(step.count / funnelSteps[i-1].count * 100) : null;
+    const width    = Math.max(5, Math.round(step.count / maxCount * 100));
+    const drop     = pctPrev !== null && pctPrev < 80 ? `↓ ${100-pctPrev}% من السابقة` : '';
+
+    return `<div class="funnel-step">
+      <div class="funnel-step-label">${step.label}</div>
+      <div class="funnel-bar-wrap">
+        <div class="funnel-bar" style="width:${width}%;background:${step.color}">
+          <span class="funnel-bar-count">${step.count}</span>
+        </div>
+      </div>
+      <div class="funnel-pct">
+        <div>${pctTotal}%</div>
+        ${drop ? `<div class="funnel-drop">${drop}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/* ============================================================
+   CONVERSION CHART
+   ============================================================ */
+function renderConversionChart(s, waCount, mapsCount, noAction, denied) {
+  const ctx = document.getElementById('conversionChart').getContext('2d');
+  if (charts.conversion) charts.conversion.destroy();
+  const other = Math.max(0, s.length - waCount - mapsCount - noAction - denied);
+  charts.conversion = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['WhatsApp ✓','خريطة ✓','بدون action','رفض لوكيشن','أخرى'],
+      datasets: [{ data:[waCount,mapsCount,noAction,denied,other], backgroundColor:['#3D7A3A','#1A8FBB','#B83232','#C97B1A','#8A96B0'], borderWidth:0, hoverOffset:8 }]
+    },
+    options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{ font:{size:11}, padding:12, boxWidth:12 } } } }
+  });
+}
+
+/* ============================================================
+   BRANCH SUMMARY CARDS
+   ============================================================ */
+function renderBranchSummary(s) {
+  const branchMap = {};
+  s.forEach(x => {
+    const id   = x.selectedBranchId || x.branchId;
+    const name = x.selectedBranchName || x.branchName;
+    const city = x.selectedBranchCity || x.branchCity;
+    if (!id && !name) return;
+    const key = id || name;
+    if (!branchMap[key]) branchMap[key] = { id, name, city, sessions:0, wa:0, maps:0, exits:0, distArr:[] };
+    branchMap[key].sessions++;
+    if (x.clickedWhatsapp) branchMap[key].wa++;
+    if (x.clickedMaps)     branchMap[key].maps++;
+    if (x.exitedWithoutAction) branchMap[key].exits++;
+    const d = x.selectedDistanceKm || x.distanceKm;
+    if (d) branchMap[key].distArr.push(d);
+  });
+  const branches = Object.values(branchMap);
+  if (!branches.length) { document.getElementById('branchSummaryGrid').innerHTML = '<div class="empty-state"><div class="empty-icon">🏪</div>لا توجد بيانات فروع</div>'; return; }
+
+  const topConv   = branches.sort((a,b)=>(b.wa+b.maps)-(a.wa+a.maps))[0];
+  const mostRouted= branches.sort((a,b)=>b.sessions-a.sessions)[0];
+  const highExit  = branches.sort((a,b)=>b.exits-a.exits)[0];
+  const allDists  = s.map(x=>x.selectedDistanceKm||x.distanceKm).filter(Boolean);
+  const avgDist   = allDists.length ? (allDists.reduce((a,b)=>a+b,0)/allDists.length).toFixed(1) : '—';
+  const delivSess = s.filter(x=>x.selectedDelivery).length;
+  const delivPct  = Math.round(delivSess/s.length*100);
+
+  document.getElementById('branchSummaryGrid').innerHTML = [
+    { title:'أعلى فرع تحويلاً', value: topConv?.name || '—', sub: topConv ? `${topConv.wa} واتساب · ${topConv.maps} خريطة` : '' },
+    { title:'أكثر فرع توجيهاً', value: mostRouted?.name || '—', sub: mostRouted ? `${mostRouted.sessions} سيشن` : '' },
+    { title:'أعلى فرع خروجاً', value: highExit?.name || '—', sub: highExit ? `${highExit.exits} خروج بدون action` : '' },
+    { title:'متوسط المسافة للفرع', value: avgDist + ' كم', sub: 'متوسط المسافة للفروع المختارة' },
+    { title:'سيشنز بخدمة توصيل', value: delivPct + '%', sub: `${delivSess} من أصل ${s.length} سيشن` },
+    { title:'إجمالي الفروع النشطة', value: branches.length, sub: 'فروع تلقّت توجيهات في هذه الفترة' },
+  ].map(c => `<div class="branch-stat-card">
+    <div class="branch-stat-title">${c.title}</div>
+    <div class="branch-stat-value">${c.value}</div>
+    <div class="branch-stat-sub">${c.sub}</div>
+  </div>`).join('');
+}
+
+/* ============================================================
+   TOP BRANCHES TABLE
+   ============================================================ */
+function renderBranchesTable(s) {
+  const branchMap = {};
+  s.forEach(x => {
+    const id   = x.selectedBranchId || x.branchId;
+    const name = x.selectedBranchName || x.branchName;
+    const city = x.selectedBranchCity || x.branchCity;
+    const dist = x.selectedBranchDistrict || x.branchDistrict;
+    if (!name) return;
+    const key = id || name;
+    if (!branchMap[key]) branchMap[key] = {id:id||'—',name,city,district:dist,sessions:0,wa:0,maps:0,distArr:[],delivery:0};
+    branchMap[key].sessions++;
+    if (x.clickedWhatsapp) branchMap[key].wa++;
+    if (x.clickedMaps)     branchMap[key].maps++;
+    if (x.selectedDelivery || x.deliveryAvailable) branchMap[key].delivery++;
+    const d = x.selectedDistanceKm || x.distanceKm;
+    if (d) branchMap[key].distArr.push(d);
+  });
+
+  const rows = Object.values(branchMap)
+    .sort((a,b)=>(b.wa+b.maps)-(a.wa+a.maps))
+    .slice(0,10)
+    .map(b => {
+      const convRate = Math.round((b.wa+b.maps)/b.sessions*100);
+      const avgDist  = b.distArr.length ? (b.distArr.reduce((a,x)=>a+x,0)/b.distArr.length).toFixed(1) : '—';
+      const cls = convRate>=60?'conv-rate-high':convRate>=30?'conv-rate-med':'conv-rate-low';
+      return `<tr>
+        <td><strong>${b.name}</strong></td>
+        <td>${b.city||'—'}</td>
+        <td>${b.district||'—'}</td>
+        <td>${b.sessions}</td>
+        <td>${b.wa}</td>
+        <td>${b.maps}</td>
+        <td class="${cls}">${convRate}%</td>
+        <td>${avgDist} كم</td>
+        <td>${b.delivery > 0 ? '✅' : '—'}</td>
+      </tr>`;
+    }).join('');
+
+  document.getElementById('branchesTable').innerHTML = `<table>
+    <thead><tr>
+      <th>اسم الفرع</th><th>المدينة</th><th>الحي</th>
+      <th>السيشنز</th><th>واتساب</th><th>خريطة</th>
+      <th>معدل التحويل</th><th>متوسط المسافة</th><th>توصيل</th>
+    </tr></thead>
+    <tbody>${rows || '<tr><td colspan="9" style="text-align:center;color:var(--text-muted)">لا توجد بيانات</td></tr>'}</tbody>
+  </table>`;
+}
+
+/* ============================================================
+   SOURCE PERFORMANCE
+   ============================================================ */
+function renderSourcePerf(s) {
+  const srcMap = {};
+  s.forEach(x => {
+    let src = x.sourceType || x.utmSource || 'مباشر';
+    if (!src || src === 'direct' || src === '') src = 'مباشر';
+    if (!srcMap[src]) srcMap[src] = {sessions:0, converted:0, granted:0, exited:0};
+    srcMap[src].sessions++;
+    if (x.clickedWhatsapp||x.clickedMaps) srcMap[src].converted++;
+    if (x.hasLocationGranted) srcMap[src].granted++;
+    if (x.exitedWithoutAction) srcMap[src].exited++;
+  });
+
+  const rows = Object.entries(srcMap).sort((a,b)=>b[1].sessions-a[1].sessions).map(([src, d]) => {
+    const convR  = Math.round(d.converted/d.sessions*100);
+    const grantR = Math.round(d.granted/d.sessions*100);
+    const exitR  = Math.round(d.exited/d.sessions*100);
+    const cls = convR>=50?'conv-rate-high':convR>=25?'conv-rate-med':'conv-rate-low';
+    return `<div class="source-row">
+      <div class="source-name">${src}</div>
+      <div class="source-metric"><span>${d.sessions}</span>سيشن</div>
+      <div class="source-metric"><span class="${cls}">${convR}%</span>تحويل</div>
+      <div class="source-metric"><span>${grantR}%</span>موافقة</div>
+      <div class="source-metric"><span>${exitR}%</span>خروج</div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('sourcePerformance').innerHTML = `
+    <h3>أداء مصادر الزيارات</h3>
+    <div class="source-row" style="border-bottom:2px solid var(--border);margin-bottom:4px">
+      <div class="source-header">المصدر</div>
+      <div class="source-header" style="text-align:center">سيشنز</div>
+      <div class="source-header" style="text-align:center">تحويل</div>
+      <div class="source-header" style="text-align:center">موافقة</div>
+      <div class="source-header" style="text-align:center">خروج</div>
+    </div>
+    ${rows || '<div class="empty-state">لا توجد بيانات</div>'}
+  `;
+}
+
+/* ============================================================
+   DEVICE CHART
+   ============================================================ */
+function renderDeviceChart(s) {
+  const devMap = {};
+  s.forEach(x => { const d = x.deviceType||'unknown'; devMap[d]=(devMap[d]||0)+1; });
+  const ctx = document.getElementById('deviceChart').getContext('2d');
+  if (charts.device) charts.device.destroy();
+  charts.device = new Chart(ctx, {
+    type: 'pie',
+    data: {
+      labels: Object.keys(devMap).map(k => ({mobile:'موبايل',desktop:'ديسكتوب',tablet:'تابلت'}[k]||k)),
+      datasets: [{ data: Object.values(devMap), backgroundColor:['#1A8FBB','#1B2E5E','#3D7A3A','#C97B1A'], borderWidth:0 }]
+    },
+    options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{ font:{size:11}, padding:12, boxWidth:12 } } } }
+  });
+}
+
+/* ============================================================
+   JOURNEY HEALTH
+   ============================================================ */
+function renderJourneyHealth(s, waCount, mapsCount, noAction, granted, denied) {
+  const closedBefore  = s.filter(x=>x.closedBeforePermission).length;
+  const deniedLeft    = s.filter(x=>x.hasLocationDenied && x.exitedWithoutAction).length;
+  const branchNoClick = s.filter(x=>(x.hasBranchSelected||x.selectedBranchId) && !x.clickedWhatsapp && !x.clickedMaps).length;
+  const manualNoClick = s.filter(x=>x.hasManualFallback && !x.clickedWhatsapp && !x.clickedMaps).length;
+
+  const items = [
+    { label:'أُغلق قبل طلب اللوكيشن', value:closedBefore, icon:'⏩', color:'var(--amber)' },
+    { label:'رفض اللوكيشن وغادر',       value:deniedLeft,  icon:'🚫', color:'var(--red)' },
+    { label:'اختار فرع ولم ينقر',        value:branchNoClick, icon:'🤔', color:'var(--amber)' },
+    { label:'عرض يدوي ولم ينقر',         value:manualNoClick, icon:'📋', color:'var(--amber)' },
+    { label:'تحويل WhatsApp ✓',           value:waCount,    icon:'✅', color:'var(--green)' },
+    { label:'تحويل خريطة ✓',             value:mapsCount,  icon:'✅', color:'var(--green)' },
+  ];
+
+  document.getElementById('journeyGrid').innerHTML = items.map(i => `
+    <div class="journey-card">
+      <div class="journey-label">${i.label}</div>
+      <div class="journey-value" style="color:${i.color}">${i.icon} ${i.value}</div>
+      <div class="journey-sub">${Math.round(i.value/s.length*100)}% من السيشنز</div>
+    </div>`).join('');
+}
+
+/* ============================================================
+   TECHNICAL HEALTH
+   ============================================================ */
+function renderTechHealth(s, sheetSucc, sheetLoadMs) {
+  const sheetTotal   = s.filter(x=>x.sheetLoadStatus).length;
+  const sheetSuccPct = sheetTotal ? Math.round(sheetSucc.length/sheetTotal*100) : 100;
+  const geoErrors    = s.filter(x=>x.locationError && x.locationError !== '').length;
+  const errorStages  = {};
+  s.forEach(x => { if(x.errorStage && x.errorStage!=='none') errorStages[x.errorStage]=(errorStages[x.errorStage]||0)+1; });
+  const topErr = Object.entries(errorStages).sort((a,b)=>b[1]-a[1])[0];
+  const browsers = {}, oss = {};
+  s.forEach(x => { if(x.browser){browsers[x.browser]=(browsers[x.browser]||0)+1;} if(x.os){oss[x.os]=(oss[x.os]||0)+1;} });
+  const topBrowser = Object.entries(browsers).sort((a,b)=>b[1]-a[1])[0];
+  const topOS      = Object.entries(oss).sort((a,b)=>b[1]-a[1])[0];
+
+  const items = [
+    { label:'نجاح تحميل البيانات', value: sheetSuccPct+'%', sub: `${sheetSucc.length} من ${sheetTotal}` },
+    { label:'متوسط وقت التحميل',   value: sheetLoadMs ? sheetLoadMs+'ms' : '—', sub: 'وقت تحميل Google Sheet' },
+    { label:'أخطاء GPS',           value: geoErrors, sub: 'سيشن بخطأ موقع' },
+    { label:'أكثر متصفح استخداماً',value: topBrowser?.[0] || '—', sub: topBrowser?.[1]+' سيشن' || '' },
+    { label:'أكثر نظام استخداماً', value: topOS?.[0] || '—', sub: topOS?.[1]+' سيشن' || '' },
+    { label:'أكثر مرحلة خطأً',     value: topErr?.[0] || 'لا أخطاء', sub: topErr ? topErr[1]+' مرة' : '' },
+  ];
+
+  document.getElementById('techGrid').innerHTML = items.map(i => `
+    <div class="tech-item">
+      <div class="tech-label">${i.label}</div>
+      <div class="tech-value">${i.value}</div>
+      ${i.sub ? `<div class="tech-sub">${i.sub}</div>` : ''}
+    </div>`).join('');
+}
+
+/* ============================================================
+   RAW DATA TABLE (aggregated sessions)
+   ============================================================ */
+function renderRawData(s) {
+  const cols = ['sessionId','date','finalStatus','durationSeconds','locationPermission','selectedBranchName','selectedBranchCity','clickedWhatsapp','clickedMaps','exitedWithoutAction','sourceType','deviceType'];
+  const labels = ['Session ID','التاريخ','الحالة النهائية','المدة (ث)','اللوكيشن','الفرع المختار','المدينة','واتساب','خريطة','خروج بدون action','المصدر','الجهاز'];
+  const wrap = document.getElementById('rawDataWrap');
+  wrap.innerHTML = `<div class="table-card" style="max-height:400px;overflow:auto">
+    <table>
+      <thead><tr>${labels.map(l=>`<th>${l}</th>`).join('')}</tr></thead>
+      <tbody>${s.slice(0,100).map(row=>`<tr>${cols.map(c=>{
+        const v = row[c];
+        if (typeof v === 'boolean') return `<td>${v?'✅':'—'}</td>`;
+        return `<td>${v||'—'}</td>`;
+      }).join('')}</tr>`).join('')}</tbody>
+    </table>
+    ${s.length>100?`<div style="padding:10px;text-align:center;font-size:12px;color:var(--text-muted)">عرض أول 100 من أصل ${s.length} سيشن</div>`:''}
+  </div>`;
+}
+
+function toggleRaw() {
+  const wrap = document.getElementById('rawDataWrap');
+  wrap.classList.toggle('open');
+}
+
+/* ============================================================
+   DATA LOADING
+   ============================================================ */
+async function loadData() {
+  showLoading(true);
+  document.getElementById('errorState').style.display = 'none';
+  document.getElementById('mainContent').style.display = 'block';
+
+  const src = DATA_SOURCES.customerSessions;
+  const url = src.getUrl();
+
+  try {
+    const res  = await fetch(url, { cache: 'no-cache' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    rawRows    = src.parser(text);
+
+    if (!rawRows.length) throw new Error('الشيت فارغ أو لا توجد بيانات.');
+
+    normalizedSessions = aggregateSessions(rawRows);
+    populateFilters(normalizedSessions);
+    filteredSessions   = [...normalizedSessions];
+
+    document.getElementById('lastUpdatedLabel').textContent = 'آخر تحديث: ' + new Date().toLocaleString('ar-SA');
+
+    renderDashboard();
+    showLoading(false);
+
+  } catch (err) {
+    console.error(err);
+    showLoading(false);
+    document.getElementById('errorMsg').textContent = err.message || 'تعذّر الاتصال بـ Google Sheet.';
+    document.getElementById('errorState').style.display = 'block';
+    document.getElementById('dashboardContent').style.display = 'none';
+  }
+}
+
+function showLoading(show) {
+  document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none';
+}
+
+async function refreshData() {
+  const btn = document.getElementById('refreshBtn');
+  btn.classList.add('spinning');
+  await loadData();
+  btn.classList.remove('spinning');
+}
+
+/* ============================================================
+   INIT
+   ============================================================ */
+window.addEventListener('DOMContentLoaded', () => {
+  loadData();
+});
+</script>
+</body>
+</html>
